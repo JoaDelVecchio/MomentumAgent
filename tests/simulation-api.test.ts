@@ -26,6 +26,44 @@ describe("local simulation API", () => {
     });
   });
 
+  it("asks for required patient data before simulated booking confirmation", async () => {
+    const app = buildApp({ enableSimulationRoutes: true, simulationNow });
+    const basePayload = {
+      clinicId: "clinic_1",
+      conversationId: "conv_confirm",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111"
+    };
+
+    await app.inject({
+      method: "POST",
+      url: "/simulate/inbound-message",
+      payload: { ...basePayload, text: "Quiero reservar botox" }
+    });
+
+    const confirmResponse = await app.inject({
+      method: "POST",
+      url: "/simulate/inbound-message",
+      payload: { ...basePayload, text: "si" }
+    });
+
+    expect(confirmResponse.json()).toEqual({
+      kind: "reply",
+      text: "Perfecto. Para confirmar el turno, pasame nombre y apellido."
+    });
+
+    const nameResponse = await app.inject({
+      method: "POST",
+      url: "/simulate/inbound-message",
+      payload: { ...basePayload, text: "Ana Gomez" }
+    });
+
+    expect(nameResponse.json()).toEqual({
+      kind: "reply",
+      text: "Turno confirmado para 2026-06-01T13:00:00.000Z. Te vamos a enviar el recordatorio antes del turno."
+    });
+  });
+
   it("returns audit events from simulated messages", async () => {
     const app = buildApp({ enableSimulationRoutes: true, simulationNow });
 

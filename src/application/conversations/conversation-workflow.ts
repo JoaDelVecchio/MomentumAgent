@@ -1,5 +1,5 @@
 import type { Conversation, InMemoryRepositories, PendingBooking } from "../../adapters/memory/repositories.js";
-import type { ClinicProfile, Service } from "../../domain/types.js";
+import type { Appointment, ClinicProfile, Service } from "../../domain/types.js";
 import type { AuditLogPort } from "../../ports/audit-log.js";
 import type { SchedulingService } from "../scheduling/scheduling-service.js";
 import { interpretIntent, normalizeText } from "./intent.js";
@@ -31,6 +31,11 @@ export class ConversationWorkflow {
       return { kind: "handoff", text: "Recepcion continua la conversacion por este mismo chat." };
     }
 
+    const pendingDataResult = await this.tryCompletePendingPatientData(input, conversation);
+    if (pendingDataResult) {
+      return pendingDataResult;
+    }
+
     const intent = interpretIntent(input.text);
     await this.audit.record({
       clinicId: input.clinicId,
@@ -58,18 +63,12 @@ export class ConversationWorkflow {
 
     if (intent.type === "cancel") {
       this.clearPendingBooking(input.conversationId);
-      return {
-        kind: "reply",
-        text: "Pasame el dia y horario del turno que queres cancelar, asi lo ubico y te confirmo la baja."
-      };
+      return this.handleCancelIntent(input);
     }
 
     if (intent.type === "reschedule") {
       this.clearPendingBooking(input.conversationId);
-      return {
-        kind: "reply",
-        text: "Pasame el dia y horario del turno que queres cambiar, y si tenes preferencia de nuevo dia."
-      };
+      return this.handleRescheduleIntent(input);
     }
 
     return {
@@ -165,20 +164,33 @@ export class ConversationWorkflow {
       return { kind: "reply", text: "Decime que tratamiento queres reservar y te paso horarios disponibles." };
     }
 
+    if (!pending.appointmentId && this.missingRequiredPatientFields(input.clinicId, input.patientId).includes("fullName")) {
+      return { kind: "reply", text: "Perfecto. Para confirmar el turno, pasame nombre y apellido." };
+    }
+
     try {
-      const appointment = await this.scheduling.bookAppointment({
-        clinicId: input.clinicId,
-        patientId: input.patientId,
-        serviceId: pending.serviceId,
-        startsAt: pending.startsAt,
-        professionalId: pending.professionalId,
-        conversationId: input.conversationId
-      });
+      const appointment = pending.appointmentId
+        ? await this.scheduling.rescheduleAppointment({
+            clinicId: input.clinicId,
+            appointmentId: pending.appointmentId,
+            startsAt: pending.startsAt,
+            conversationId: input.conversationId
+          })
+        : await this.scheduling.bookAppointment({
+            clinicId: input.clinicId,
+            patientId: input.patientId,
+            serviceId: pending.serviceId,
+            startsAt: pending.startsAt,
+            professionalId: pending.professionalId,
+            conversationId: input.conversationId
+          });
       this.clearPendingBooking(input.conversationId);
 
       return {
         kind: "reply",
-        text: `Turno confirmado para ${appointment.startsAt.toISOString()}. Te vamos a enviar el recordatorio antes del turno.`
+        text: pending.appointmentId
+          ? `Turno reprogramado para ${appointment.startsAt.toISOString()}. Te vamos a enviar el recordatorio antes del turno.`
+          : `Turno confirmado para ${appointment.startsAt.toISOString()}. Te vamos a enviar el recordatorio antes del turno.`
       };
     } catch {
       this.clearPendingBooking(input.conversationId);
@@ -203,6 +215,120 @@ export class ConversationWorkflow {
       this.repos.saveConversation({ ...nextConversation, updatedAt: this.now() });
     }
   }
+
+  private async tryCompletePendingPatientData(input: InboundMessage, conversation: Conversation) {
+    if (!conversation.pendingBooking || conversation.pendingBooking.appointmentId) {
+      return undefined;
+    }
+
+    if (!this.missingRequiredPatientFields(input.clinicId, input.patientId).includes("fullName")) {
+      return undefined;
+    }
+
+    if (!looksLikeFullName(input.text)) {
+      return undefined;
+    }
+
+    const patient = this.repos.getPatient(input.patientId);
+    this.repos.upsertPatient({
+      id: input.patientId,
+      whatsappNumber: input.whatsappNumber,
+      fullName: normalizeFullName(input.text) ?? patient?.fullName
+    });
+
+    return this.handleConfirmation(input, conversation);
+  }
+
+  private missingRequiredPatientFields(clinicId: string, patientId: string) {
+    const profile = this.repos.getClinicProfile(clinicId);
+    const patient = this.repos.getPatient(patientId);
+    if (!profile) {
+      return [];
+    }
+
+    return profile.requiredPatientFields.filter((field) => field === "fullName" && !patient?.fullName);
+  }
+
+  private async handleCancelIntent(input: InboundMessage): Promise<WorkflowResult> {
+    const appointment = this.findSingleScheduledAppointment(input);
+    if (!appointment) {
+      return {
+        kind: "reply",
+        text: "No encontre un unico turno activo para cancelar. Pasame dia y horario y lo reviso."
+      };
+    }
+
+    try {
+      const cancelled = await this.scheduling.cancelAppointment({
+        clinicId: input.clinicId,
+        appointmentId: appointment.id,
+        conversationId: input.conversationId
+      });
+
+      return { kind: "reply", text: `Turno cancelado: ${cancelled.startsAt.toISOString()}.` };
+    } catch {
+      return { kind: "reply", text: "No pude cancelar ese turno automaticamente. Te derivo con recepcion." };
+    }
+  }
+
+  private async handleRescheduleIntent(input: InboundMessage): Promise<WorkflowResult> {
+    const appointment = this.findSingleScheduledAppointment(input);
+    if (!appointment) {
+      return {
+        kind: "reply",
+        text: "No encontre un unico turno activo para reprogramar. Pasame dia y horario y lo reviso."
+      };
+    }
+
+    const profile = this.repos.getClinicProfile(input.clinicId);
+    const service = profile?.services.find((candidate) => candidate.id === appointment.serviceId);
+    if (!profile || !service) {
+      return { kind: "reply", text: "No pude encontrar el servicio del turno. Te derivo con recepcion." };
+    }
+
+    const searchFrom = startOfDay(this.now());
+    const slots = await this.scheduling.findSlots({
+      clinicId: input.clinicId,
+      serviceId: service.id,
+      professionalId: appointment.professionalId,
+      from: searchFrom,
+      to: addDays(searchFrom, 14)
+    });
+    const nextSlot = slots.find((slot) => slot.startsAt.getTime() !== appointment.startsAt.getTime());
+    if (!nextSlot) {
+      return { kind: "reply", text: "No encontre otro horario disponible para reprogramar. Te aviso si se libera uno." };
+    }
+
+    this.setPendingBooking(input.conversationId, {
+      appointmentId: appointment.id,
+      serviceId: appointment.serviceId,
+      professionalId: appointment.professionalId,
+      startsAt: nextSlot.startsAt,
+      endsAt: nextSlot.endsAt
+    });
+
+    return {
+      kind: "reply",
+      text: `Tengo este nuevo horario: ${nextSlot.startsAt.toISOString()}. Si te sirve, lo confirmamos.`
+    };
+  }
+
+  private findSingleScheduledAppointment(input: InboundMessage): Appointment | undefined {
+    const scheduled = this.repos
+      .listAppointmentsByPatient(input.patientId)
+      .filter((appointment) => appointment.clinicId === input.clinicId && appointment.status === "scheduled");
+    return scheduled.length === 1 ? scheduled[0] : undefined;
+  }
+}
+
+function looksLikeFullName(text: string) {
+  const normalized = normalizeFullName(text);
+  return normalized ? normalized.split(" ").length >= 2 : false;
+}
+
+function normalizeFullName(text: string) {
+  const normalized = text.replace(/[^\p{L}\s'-]/gu, " ").replace(/\s+/g, " ").trim();
+  return normalized.length >= 5 ? normalized : undefined;
 }
 
 function findService(profile: ClinicProfile, serviceName: string): Service | undefined {

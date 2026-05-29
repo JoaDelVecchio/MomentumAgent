@@ -60,7 +60,7 @@ describe("ConversationWorkflow", () => {
     expect(result.text).not.toContain("DNI");
   });
 
-  it("confirms the offered slot on the next patient message and creates an appointment", async () => {
+  it("asks for required patient data before confirming the offered slot", async () => {
     const { calendar, repos, workflow } = buildContext();
     calendar.seedAvailability("cal_perez", [
       { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
@@ -81,7 +81,7 @@ describe("ConversationWorkflow", () => {
       endsAt: new Date("2026-06-01T13:30:00.000Z")
     });
 
-    const result = await workflow.handleInboundMessage({
+    const confirmResult = await workflow.handleInboundMessage({
       clinicId: "clinic_1",
       conversationId: "conv_1",
       patientId: "pat_1",
@@ -89,10 +89,25 @@ describe("ConversationWorkflow", () => {
       text: "si"
     });
 
-    expect(result).toEqual({
+    expect(confirmResult).toEqual({
+      kind: "reply",
+      text: "Perfecto. Para confirmar el turno, pasame nombre y apellido."
+    });
+    expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
+
+    const nameResult = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Ana Gomez"
+    });
+
+    expect(nameResult).toEqual({
       kind: "reply",
       text: "Turno confirmado para 2026-06-01T13:00:00.000Z. Te vamos a enviar el recordatorio antes del turno."
     });
+    expect(repos.getPatient("pat_1")?.fullName).toBe("Ana Gomez");
     expect(repos.getConversation("conv_1")?.pendingBooking).toBeUndefined();
     expect(repos.listAppointmentsByPatient("pat_1")).toEqual([
       expect.objectContaining({
@@ -102,6 +117,35 @@ describe("ConversationWorkflow", () => {
         status: "scheduled"
       })
     ]);
+  });
+
+  it("confirms immediately when required patient data already exists", async () => {
+    const { calendar, repos, workflow } = buildContext();
+    repos.upsertPatient({ id: "pat_1", whatsappNumber: "+5491111111111", fullName: "Ana Gomez" });
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
+    ]);
+
+    await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Quiero reservar botox"
+    });
+
+    await expect(
+      workflow.handleInboundMessage({
+        clinicId: "clinic_1",
+        conversationId: "conv_1",
+        patientId: "pat_1",
+        whatsappNumber: "+5491111111111",
+        text: "confirmo"
+      })
+    ).resolves.toEqual({
+      kind: "reply",
+      text: "Turno confirmado para 2026-06-01T13:00:00.000Z. Te vamos a enviar el recordatorio antes del turno."
+    });
   });
 
   it("recognizes common service aliases without onboarding aliases", async () => {
@@ -263,7 +307,7 @@ describe("ConversationWorkflow", () => {
       })
     ).resolves.toEqual({
       kind: "reply",
-      text: "Pasame el dia y horario del turno que queres cancelar, asi lo ubico y te confirmo la baja."
+      text: "No encontre un unico turno activo para cancelar. Pasame dia y horario y lo reviso."
     });
 
     await expect(
@@ -276,8 +320,94 @@ describe("ConversationWorkflow", () => {
       })
     ).resolves.toEqual({
       kind: "reply",
-      text: "Pasame el dia y horario del turno que queres cambiar, y si tenes preferencia de nuevo dia."
+      text: "No encontre un unico turno activo para reprogramar. Pasame dia y horario y lo reviso."
     });
+  });
+
+  it("cancels the only scheduled appointment from chat", async () => {
+    const { calendar, repos, workflow } = buildContext();
+    repos.upsertPatient({ id: "pat_1", whatsappNumber: "+5491111111111", fullName: "Ana Gomez" });
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
+    ]);
+    await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Quiero reservar botox"
+    });
+    await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "si"
+    });
+
+    const result = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Necesito cancelar mi turno"
+    });
+
+    expect(result).toEqual({
+      kind: "reply",
+      text: "Turno cancelado: 2026-06-01T13:00:00.000Z."
+    });
+    expect(repos.listAppointmentsByPatient("pat_1")[0]?.status).toBe("cancelled");
+  });
+
+  it("offers and confirms a reschedule for the only scheduled appointment", async () => {
+    const { calendar, repos, workflow } = buildContext();
+    repos.upsertPatient({ id: "pat_1", whatsappNumber: "+5491111111111", fullName: "Ana Gomez" });
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") },
+      { startsAt: new Date("2026-06-02T14:00:00.000Z"), endsAt: new Date("2026-06-02T14:30:00.000Z") }
+    ]);
+    await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Quiero reservar botox"
+    });
+    await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "si"
+    });
+
+    const offer = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Quiero reprogramar mi turno"
+    });
+
+    expect(offer).toEqual({
+      kind: "reply",
+      text: "Tengo este nuevo horario: 2026-06-02T14:00:00.000Z. Si te sirve, lo confirmamos."
+    });
+
+    const confirmation = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "si"
+    });
+
+    expect(confirmation).toEqual({
+      kind: "reply",
+      text: "Turno reprogramado para 2026-06-02T14:00:00.000Z. Te vamos a enviar el recordatorio antes del turno."
+    });
+    expect(repos.listAppointmentsByPatient("pat_1")[0]?.startsAt).toEqual(new Date("2026-06-02T14:00:00.000Z"));
   });
 
   it("replies with a fallback for general questions", async () => {

@@ -34,7 +34,7 @@ class BlockingUpdateCalendar extends FakeCalendar {
   }
 }
 
-function buildContext(calendar = new FakeCalendar()) {
+function buildContext(calendar = new FakeCalendar(), now = () => new Date("2026-05-29T12:00:00.000Z")) {
   const repos = new InMemoryRepositories();
   const audit = new InMemoryAuditLog();
 
@@ -89,7 +89,7 @@ function buildContext(calendar = new FakeCalendar()) {
     { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
   ]);
 
-  return { repos, calendar, audit, service: new SchedulingService(repos, calendar, audit) };
+  return { repos, calendar, audit, service: new SchedulingService(repos, calendar, audit, now) };
 }
 
 describe("SchedulingService", () => {
@@ -409,5 +409,105 @@ describe("SchedulingService", () => {
     });
 
     expect(appointment.endsAt).toEqual(new Date("2026-06-01T13:30:00.000Z"));
+  });
+
+  it("applies minimum notice and cancellation notice rules", async () => {
+    const { repos, calendar, service } = buildContext(new FakeCalendar(), () => new Date("2026-06-01T12:00:00.000Z"));
+    repos.upsertClinicProfile(
+      parseClinicProfile({
+        clinicId: "clinic_1",
+        name: "Clinica Demo",
+        timezone: "America/Argentina/Buenos_Aires",
+        services: [
+          {
+            id: "svc_botox",
+            name: "Botox",
+            durationMinutes: 30,
+            priceText: "Desde $120.000",
+            preparation: "Evitar alcohol 24 horas antes.",
+            restrictions: [],
+            professionalIds: ["pro_perez"]
+          }
+        ],
+        professionals: [{ id: "pro_perez", name: "Dra. Perez", calendarId: "cal_perez" }],
+        appointmentRules: { minimumNoticeMinutes: 120, cancellationNoticeMinutes: 240, bufferMinutes: 0 },
+        requiredPatientFields: ["fullName"]
+      })
+    );
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") },
+      { startsAt: new Date("2026-06-01T15:00:00.000Z"), endsAt: new Date("2026-06-01T15:30:00.000Z") }
+    ]);
+
+    await expect(
+      service.bookAppointment({
+        clinicId: "clinic_1",
+        patientId: "pat_1",
+        serviceId: "svc_botox",
+        startsAt: new Date("2026-06-01T13:00:00.000Z"),
+        professionalId: "pro_perez"
+      })
+    ).rejects.toThrow("Selected slot is no longer available");
+
+    const appointment = await service.bookAppointment({
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      serviceId: "svc_botox",
+      startsAt: new Date("2026-06-01T15:00:00.000Z"),
+      professionalId: "pro_perez"
+    });
+
+    await expect(
+      service.cancelAppointment({ clinicId: "clinic_1", appointmentId: appointment.id })
+    ).rejects.toThrow(`Appointment ${appointment.id} cannot be cancelled inside the notice window`);
+    await expect(
+      service.rescheduleAppointment({
+        clinicId: "clinic_1",
+        appointmentId: appointment.id,
+        startsAt: new Date("2026-06-02T15:00:00.000Z")
+      })
+    ).rejects.toThrow(`Appointment ${appointment.id} cannot be rescheduled inside the notice window`);
+  });
+
+  it("blocks calendar time with configured buffer while keeping appointment duration", async () => {
+    const { repos, calendar, service } = buildContext();
+    repos.upsertClinicProfile(
+      parseClinicProfile({
+        clinicId: "clinic_1",
+        name: "Clinica Demo",
+        timezone: "America/Argentina/Buenos_Aires",
+        services: [
+          {
+            id: "svc_botox",
+            name: "Botox",
+            durationMinutes: 30,
+            priceText: "Desde $120.000",
+            preparation: "Evitar alcohol 24 horas antes.",
+            restrictions: [],
+            professionalIds: ["pro_perez"]
+          }
+        ],
+        professionals: [{ id: "pro_perez", name: "Dra. Perez", calendarId: "cal_perez" }],
+        appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 0, bufferMinutes: 15 },
+        requiredPatientFields: ["fullName"]
+      })
+    );
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T14:30:00.000Z") }
+    ]);
+
+    const appointment = await service.bookAppointment({
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      serviceId: "svc_botox",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      professionalId: "pro_perez"
+    });
+
+    expect(appointment.endsAt).toEqual(new Date("2026-06-01T13:30:00.000Z"));
+    expect(await calendar.getEvent(appointment.calendarEventId)).toMatchObject({
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      endsAt: new Date("2026-06-01T13:45:00.000Z")
+    });
   });
 });

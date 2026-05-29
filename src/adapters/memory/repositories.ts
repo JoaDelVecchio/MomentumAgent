@@ -1,6 +1,7 @@
 import type { Appointment, ClinicProfile, Id, Patient } from "../../domain/types.js";
 
 export type PendingBooking = {
+  appointmentId?: Id;
   serviceId: Id;
   professionalId: Id;
   startsAt: Date;

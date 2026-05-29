@@ -1,6 +1,6 @@
 import type { InMemoryRepositories } from "../../adapters/memory/repositories.js";
 import { DomainError } from "../../domain/errors.js";
-import type { Appointment } from "../../domain/types.js";
+import type { Appointment, ClinicProfile } from "../../domain/types.js";
 import type { AuditLogPort } from "../../ports/audit-log.js";
 import { CalendarAvailabilityError, type CalendarPort, type CalendarSlot } from "../../ports/calendar.js";
 
@@ -17,7 +17,8 @@ export class SchedulingService {
   constructor(
     private readonly repos: InMemoryRepositories,
     private readonly calendar: CalendarPort,
-    private readonly audit: AuditLogPort
+    private readonly audit: AuditLogPort,
+    private readonly now: () => Date = () => new Date()
   ) {}
 
   async findSlots(input: {
@@ -39,11 +40,12 @@ export class SchedulingService {
       return serviceCompatible && requested;
     });
 
+    const durationMinutes = service.durationMinutes + profile.appointmentRules.bufferMinutes;
     return this.calendar.findFreeSlots({
       calendarIds: professionals.map((professional) => professional.calendarId),
-      from: input.from,
+      from: maxDate(input.from, this.minimumBookableStart(profile)),
       to: input.to,
-      durationMinutes: service.durationMinutes
+      durationMinutes
     });
   }
 
@@ -61,13 +63,17 @@ export class SchedulingService {
 
     const startsAt = input.startsAt;
     const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60000);
+    const calendarEndsAt = addMinutes(endsAt, profile.appointmentRules.bufferMinutes);
+    if (startsAt < this.minimumBookableStart(profile)) {
+      throw new DomainError("Selected slot is no longer available");
+    }
     const slots = await this.calendar.findFreeSlots({
       calendarIds: [professional.calendarId],
       from: startsAt,
-      to: endsAt,
-      durationMinutes: service.durationMinutes
+      to: calendarEndsAt,
+      durationMinutes: service.durationMinutes + profile.appointmentRules.bufferMinutes
     });
-    const exactSlot = findContainingSlot(slots, startsAt, endsAt);
+    const exactSlot = findContainingSlot(slots, startsAt, calendarEndsAt);
     if (!exactSlot) {
       throw new DomainError("Selected slot is no longer available");
     }
@@ -77,7 +83,7 @@ export class SchedulingService {
       calendarId: professional.calendarId,
       summary: `${service.name} - ${input.patientId}`,
       startsAt,
-      endsAt,
+      endsAt: calendarEndsAt,
       metadata: { appointmentId, patientId: input.patientId, serviceId: input.serviceId }
     }, "Selected slot is no longer available");
 
@@ -112,6 +118,11 @@ export class SchedulingService {
         throw new DomainError(`Appointment ${input.appointmentId} not found`);
       }
       this.assertClinicOwnership(appointment, input.clinicId);
+      const profile = this.requireProfile(input.clinicId);
+      const cancellationNoticeMs = profile.appointmentRules.cancellationNoticeMinutes * 60000;
+      if (appointment.startsAt.getTime() - this.now().getTime() < cancellationNoticeMs) {
+        throw new DomainError(`Appointment ${appointment.id} cannot be cancelled inside the notice window`);
+      }
 
       await this.calendar.cancelEvent(appointment.calendarEventId);
       const cancelled: Appointment = { ...appointment, status: "cancelled" };
@@ -149,17 +160,25 @@ export class SchedulingService {
       if (!service || !professional) {
         throw new DomainError(`Appointment ${appointment.id} references missing service or professional`);
       }
+      const rescheduleNoticeMs = profile.appointmentRules.cancellationNoticeMinutes * 60000;
+      if (appointment.startsAt.getTime() - this.now().getTime() < rescheduleNoticeMs) {
+        throw new DomainError(`Appointment ${appointment.id} cannot be rescheduled inside the notice window`);
+      }
 
       const startsAt = input.startsAt;
       const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60000);
+      const calendarEndsAt = addMinutes(endsAt, profile.appointmentRules.bufferMinutes);
+      if (startsAt < this.minimumBookableStart(profile)) {
+        throw new DomainError("Selected reschedule slot is no longer available");
+      }
       const slots = await this.calendar.findFreeSlots({
         calendarIds: [professional.calendarId],
         from: startsAt,
-        to: endsAt,
-        durationMinutes: service.durationMinutes,
+        to: calendarEndsAt,
+        durationMinutes: service.durationMinutes + profile.appointmentRules.bufferMinutes,
         ignoredEventId: appointment.calendarEventId
       });
-      const exactSlot = findContainingSlot(slots, startsAt, endsAt);
+      const exactSlot = findContainingSlot(slots, startsAt, calendarEndsAt);
       if (!exactSlot) {
         throw new DomainError("Selected reschedule slot is no longer available");
       }
@@ -168,7 +187,7 @@ export class SchedulingService {
         calendarId: professional.calendarId,
         summary: `${service.name} - ${appointment.patientId}`,
         startsAt,
-        endsAt,
+        endsAt: calendarEndsAt,
         metadata: {
           appointmentId: appointment.id,
           patientId: appointment.patientId,
@@ -202,6 +221,10 @@ export class SchedulingService {
     if (appointment.clinicId !== clinicId) {
       throw new DomainError(`Appointment ${appointment.id} not found`);
     }
+  }
+
+  private minimumBookableStart(profile: ClinicProfile) {
+    return addMinutes(this.now(), profile.appointmentRules.minimumNoticeMinutes);
   }
 
   private async createCalendarEvent(
@@ -242,4 +265,12 @@ export class SchedulingService {
 
 function findContainingSlot(slots: CalendarSlot[], startsAt: Date, endsAt: Date) {
   return slots.find((slot) => slot.startsAt.getTime() <= startsAt.getTime() && slot.endsAt.getTime() >= endsAt.getTime());
+}
+
+function addMinutes(date: Date, minutes: number) {
+  return new Date(date.getTime() + minutes * 60000);
+}
+
+function maxDate(first: Date, second: Date) {
+  return first > second ? first : second;
 }
