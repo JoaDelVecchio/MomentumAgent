@@ -1,10 +1,18 @@
 import type { Appointment, ClinicProfile, Id, Patient } from "../../domain/types.js";
 
+export type PendingBooking = {
+  serviceId: Id;
+  professionalId: Id;
+  startsAt: Date;
+  endsAt: Date;
+};
+
 export type Conversation = {
   id: Id;
   clinicId: Id;
   patientId: Id;
   botPaused: boolean;
+  pendingBooking?: PendingBooking;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -138,11 +146,19 @@ function clonePatient(patient: Patient): Patient {
 }
 
 function cloneConversation(conversation: Conversation): Conversation {
-  return {
+  const clone: Conversation = {
     ...conversation,
     createdAt: new Date(conversation.createdAt),
     updatedAt: new Date(conversation.updatedAt)
   };
+  if (conversation.pendingBooking) {
+    clone.pendingBooking = {
+      ...conversation.pendingBooking,
+      startsAt: new Date(conversation.pendingBooking.startsAt),
+      endsAt: new Date(conversation.pendingBooking.endsAt)
+    };
+  }
+  return clone;
 }
 
 function cloneAppointment(appointment: Appointment): Appointment {
