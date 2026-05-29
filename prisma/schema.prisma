@@ -25,6 +25,7 @@ model Clinic {
   patientInterests          PatientInterest[]
   auditEvents               AuditEvent[]
   reactivationAttempts      ReactivationAttempt[]
+  calendarConnections       CalendarConnection[]
 }
 
 model Service {
@@ -184,4 +185,21 @@ model ReactivationAttempt {
   clinic         Clinic   @relation(fields: [clinicId], references: [id])
 
   @@index([clinicId, whatsappNumber, sentAt])
+}
+
+model CalendarConnection {
+  id                    String   @id @default(cuid())
+  clinicId              String
+  provider              String
+  providerAccountEmail  String
+  scopesJson            String
+  encryptedAccessToken  String?
+  encryptedRefreshToken String
+  expiryDate            DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  clinic                Clinic   @relation(fields: [clinicId], references: [id])
+
+  @@unique([clinicId, provider])
+  @@index([provider])
 }
