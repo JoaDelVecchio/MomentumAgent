@@ -37,7 +37,7 @@ export type FindFreeSlotsInput = {
   from: Date;
   to: Date;
   durationMinutes: number;
-  availabilityContext?: CalendarAvailabilityContext;
+  availabilityContext: CalendarAvailabilityContext;
   ignoredEventId?: string;
 };
 

@@ -84,9 +84,13 @@ function minutesFromTime(time: string) {
 }
 
 function isValidTimezone(timezone: string) {
+  if (/^[+-]\d{2}:\d{2}$/.test(timezone)) {
+    return false;
+  }
+
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date());
-    return true;
+    return timezone.includes("/");
   } catch {
     return false;
   }

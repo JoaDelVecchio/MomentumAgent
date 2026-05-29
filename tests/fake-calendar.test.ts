@@ -3,6 +3,13 @@ import { FakeCalendar } from "../src/adapters/memory/fake-calendar.js";
 import { CalendarAvailabilityError } from "../src/ports/calendar.js";
 
 describe("FakeCalendar", () => {
+  const availabilityContext = {
+    timezone: "America/Argentina/Buenos_Aires",
+    professionals: [],
+    serviceDurationMinutes: 30,
+    bufferMinutes: 0
+  };
+
   it("returns free slots that do not overlap existing events", async () => {
     const calendar = new FakeCalendar();
     calendar.seedAvailability("cal_perez", [
@@ -22,7 +29,8 @@ describe("FakeCalendar", () => {
       calendarIds: ["cal_perez"],
       from: new Date("2026-06-01T12:00:00.000Z"),
       to: new Date("2026-06-01T15:00:00.000Z"),
-      durationMinutes: 30
+      durationMinutes: 30,
+      availabilityContext
     });
 
     expect(slots).toEqual([
@@ -47,7 +55,8 @@ describe("FakeCalendar", () => {
       calendarIds: ["cal_perez"],
       from: new Date("2026-06-01T13:00:00.000Z"),
       to: new Date("2026-06-01T14:30:00.000Z"),
-      durationMinutes: 30
+      durationMinutes: 30,
+      availabilityContext
     });
 
     expect(slots).toEqual([
@@ -69,7 +78,8 @@ describe("FakeCalendar", () => {
       calendarIds: ["cal_perez"],
       from: new Date("2026-06-01T13:00:00.000Z"),
       to: new Date("2026-06-01T13:30:00.000Z"),
-      durationMinutes: 30
+      durationMinutes: 30,
+      availabilityContext
     });
 
     expect(slots).toEqual([
@@ -91,7 +101,8 @@ describe("FakeCalendar", () => {
       calendarIds: ["cal_perez"],
       from: new Date("2026-06-01T13:30:00.000Z"),
       to: new Date("2026-06-01T14:00:00.000Z"),
-      durationMinutes: 30
+      durationMinutes: 30,
+      availabilityContext
     });
 
     expect(slots).toEqual([
@@ -120,7 +131,8 @@ describe("FakeCalendar", () => {
       calendarIds: ["cal_perez"],
       from: new Date("2026-06-01T13:15:00.000Z"),
       to: new Date("2026-06-01T14:00:00.000Z"),
-      durationMinutes: 30
+      durationMinutes: 30,
+      availabilityContext
     });
 
     expect(slots).toEqual([
@@ -149,7 +161,8 @@ describe("FakeCalendar", () => {
       calendarIds: ["cal_perez"],
       from: new Date("2026-06-01T13:00:00.000Z"),
       to: new Date("2026-06-01T14:00:00.000Z"),
-      durationMinutes: 30
+      durationMinutes: 30,
+      availabilityContext
     });
 
     expect(slots).toEqual([
@@ -250,7 +263,8 @@ describe("FakeCalendar", () => {
       calendarIds: ["cal_perez"],
       from: new Date("2026-06-01T13:00:00.000Z"),
       to: new Date("2026-06-01T14:30:00.000Z"),
-      durationMinutes: 30
+      durationMinutes: 30,
+      availabilityContext
     });
 
     expect(slots).toEqual([
@@ -285,7 +299,8 @@ describe("FakeCalendar", () => {
       calendarIds: ["cal_perez"],
       from: new Date("2026-06-01T12:00:00.000Z"),
       to: new Date("2026-06-01T15:00:00.000Z"),
-      durationMinutes: 30
+      durationMinutes: 30,
+      availabilityContext
     });
     slots[0]?.startsAt.setUTCFullYear(2031);
 
@@ -293,7 +308,8 @@ describe("FakeCalendar", () => {
       calendarIds: ["cal_perez"],
       from: new Date("2026-06-01T12:00:00.000Z"),
       to: new Date("2026-06-01T15:00:00.000Z"),
-      durationMinutes: 30
+      durationMinutes: 30,
+      availabilityContext
     });
     expect(slotsAfterMutation[0]?.startsAt).toEqual(new Date("2026-06-01T13:00:00.000Z"));
 
