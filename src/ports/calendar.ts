@@ -22,7 +22,15 @@ export type FindFreeSlotsInput = {
   from: Date;
   to: Date;
   durationMinutes: number;
+  ignoredEventId?: string;
 };
+
+export class CalendarAvailabilityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CalendarAvailabilityError";
+  }
+}
 
 export interface CalendarPort {
   findFreeSlots(input: FindFreeSlotsInput): Promise<CalendarSlot[]>;

@@ -27,6 +27,8 @@ export class InMemoryRepositories {
   private appointments = new Map<Id, Appointment>();
   private interests = new Map<Id, PatientInterest>();
   private optOutWhatsappNumbers = new Set<string>();
+  private appointmentCounter = 0;
+  private appointmentLocks = new Map<Id, Promise<unknown>>();
 
   upsertClinicProfile(profile: ClinicProfile) {
     this.clinicProfiles.set(profile.clinicId, cloneClinicProfile(profile));
@@ -57,6 +59,32 @@ export class InMemoryRepositories {
 
   saveAppointment(appointment: Appointment) {
     this.appointments.set(appointment.id, cloneAppointment(appointment));
+  }
+
+  nextAppointmentId() {
+    this.appointmentCounter += 1;
+    return `appt_${this.appointmentCounter}`;
+  }
+
+  async withAppointmentLock<T>(appointmentId: Id, operation: () => Promise<T>): Promise<T> {
+    const previous = this.appointmentLocks.get(appointmentId) ?? Promise.resolve();
+    let release: () => void = () => {};
+    const currentLock = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const queuedLock = previous.catch(() => undefined).then(() => currentLock);
+
+    this.appointmentLocks.set(appointmentId, queuedLock);
+    await previous.catch(() => undefined);
+
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.appointmentLocks.get(appointmentId) === queuedLock) {
+        this.appointmentLocks.delete(appointmentId);
+      }
+    }
   }
 
   getAppointment(appointmentId: Id) {

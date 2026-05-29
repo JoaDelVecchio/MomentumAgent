@@ -5,6 +5,7 @@ import type {
   CalendarSlot,
   FindFreeSlotsInput
 } from "../../ports/calendar.js";
+import { CalendarAvailabilityError } from "../../ports/calendar.js";
 
 type AvailabilitySeed = {
   startsAt: Date;
@@ -26,19 +27,22 @@ export class FakeCalendar implements CalendarPort {
     for (const calendarId of input.calendarIds) {
       const available = this.availability.get(calendarId) ?? [];
       const activeEvents = [...this.events.values()].filter(
-        (event) => event.calendarId === calendarId && event.status === "scheduled"
+        (event) =>
+          event.id !== input.ignoredEventId &&
+          event.calendarId === calendarId &&
+          event.status === "scheduled"
       );
 
       for (const slot of available) {
-        const duration = (slot.endsAt.getTime() - slot.startsAt.getTime()) / 60000;
-        const insideWindow = slot.startsAt >= input.from && slot.endsAt <= input.to;
-        const longEnough = duration >= input.durationMinutes;
-        const overlaps = activeEvents.some(
-          (event) => slot.startsAt < event.endsAt && slot.endsAt > event.startsAt
-        );
+        const candidates = buildCandidateSlots(slot, input.from, input.to, input.durationMinutes);
+        for (const candidate of candidates) {
+          const overlaps = activeEvents.some(
+            (event) => candidate.startsAt < event.endsAt && candidate.endsAt > event.startsAt
+          );
 
-        if (insideWindow && longEnough && !overlaps) {
-          results.push({ calendarId, startsAt: new Date(slot.startsAt), endsAt: new Date(slot.endsAt) });
+          if (!overlaps) {
+            results.push({ calendarId, startsAt: candidate.startsAt, endsAt: candidate.endsAt });
+          }
         }
       }
     }
@@ -47,6 +51,7 @@ export class FakeCalendar implements CalendarPort {
   }
 
   async createEvent(input: CalendarEventInput): Promise<CalendarEvent> {
+    this.assertEventIsAvailable(input);
     this.eventCounter += 1;
     const event: CalendarEvent = {
       ...cloneEventInput(input),
@@ -62,6 +67,10 @@ export class FakeCalendar implements CalendarPort {
     if (!existing) {
       throw new Error(`Calendar event ${eventId} not found`);
     }
+    if (existing.status === "cancelled") {
+      throw new CalendarAvailabilityError("Calendar event is cancelled");
+    }
+    this.assertEventIsAvailable(input, eventId);
 
     const updated: CalendarEvent = {
       ...cloneEventInput(input),
@@ -87,6 +96,45 @@ export class FakeCalendar implements CalendarPort {
     const event = this.events.get(eventId);
     return event ? cloneEvent(event) : undefined;
   }
+
+  private assertEventIsAvailable(input: CalendarEventInput, ignoredEventId?: string) {
+    const available = this.availability.get(input.calendarId) ?? [];
+    const insideAvailability = available.some(
+      (slot) => input.startsAt >= slot.startsAt && input.endsAt <= slot.endsAt
+    );
+    if (!insideAvailability) {
+      throw new CalendarAvailabilityError("Calendar event is outside available slots");
+    }
+
+    const activeEvents = [...this.events.values()].filter(
+      (event) => event.id !== ignoredEventId && event.calendarId === input.calendarId && event.status === "scheduled"
+    );
+    const overlaps = activeEvents.some((event) => input.startsAt < event.endsAt && input.endsAt > event.startsAt);
+    if (overlaps) {
+      throw new CalendarAvailabilityError("Calendar event overlaps an existing event");
+    }
+  }
+}
+
+function buildCandidateSlots(
+  slot: AvailabilitySeed,
+  from: Date,
+  to: Date,
+  durationMinutes: number
+): AvailabilitySeed[] {
+  const candidates: AvailabilitySeed[] = [];
+  const durationMs = durationMinutes * 60000;
+  let startsAt = new Date(slot.startsAt);
+
+  while (startsAt.getTime() + durationMs <= slot.endsAt.getTime()) {
+    const endsAt = new Date(startsAt.getTime() + durationMs);
+    if (startsAt >= from && endsAt <= to) {
+      candidates.push({ startsAt: new Date(startsAt), endsAt });
+    }
+    startsAt = new Date(startsAt.getTime() + durationMs);
+  }
+
+  return candidates;
 }
 
 function cloneAvailability(slot: AvailabilitySeed): AvailabilitySeed {
