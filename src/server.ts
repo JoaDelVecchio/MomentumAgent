@@ -4,7 +4,7 @@ import { buildApp } from "./api/app.js";
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? "127.0.0.1";
 
-const app = buildApp();
+const app = buildApp({ enableSimulationRoutes: process.env.ENABLE_SIMULATION_API === "true" });
 
 await app.listen({ port, host });
 console.log(`Momentum API listening on http://${host}:${port}`);
