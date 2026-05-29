@@ -28,6 +28,7 @@ It does not implement WhatsApp/Kapso, Outlook, OpenAI interpretation, dashboard 
 - `src/domain/types.ts`: add professional working hours types.
 - `src/domain/clinic-profile.ts`: validate working hours.
 - `src/application/scheduling/slot-generator.ts`: pure local-time working-window candidate slot generation.
+- `src/ports/calendar.ts`: carry provider-neutral availability context to real calendar adapters.
 - `src/ports/calendar-auth.ts`: provider-neutral calendar credential repository/vault interfaces.
 - `src/adapters/memory/calendar-auth-repository.ts`: in-memory credentials for tests.
 - `src/adapters/prisma/calendar-auth-repository.ts`: SQLite-backed encrypted credential persistence.
@@ -51,6 +52,8 @@ It does not implement WhatsApp/Kapso, Outlook, OpenAI interpretation, dashboard 
 - Modify: `src/domain/types.ts`
 - Modify: `src/domain/clinic-profile.ts`
 - Create: `src/application/scheduling/slot-generator.ts`
+- Modify: `src/ports/calendar.ts`
+- Modify: `src/application/scheduling/scheduling-service.ts`
 - Modify: `src/dev/seed.ts`
 - Test: `tests/slot-generator.test.ts`
 - Test: `tests/clinic-profile.test.ts`
@@ -81,10 +84,13 @@ Add:
 - `WorkingDay = 0 | 1 | 2 | 3 | 4 | 5 | 6`
 - `WorkingWindow = { day: WorkingDay; startTime: string; endTime: string }`
 - `Professional.workingHours: WorkingWindow[]`
+- `FindFreeSlotsInput.availabilityContext` containing timezone, compatible professionals, service duration, and buffer.
 
 Implement `generateWorkingHourSlots(input)` in `src/application/scheduling/slot-generator.ts`.
 
 Use UTC `Date` internally and the clinic/professional IANA timezone for interpreting local working hours.
+
+Update `SchedulingService` to pass `availabilityContext` whenever it calls `CalendarPort.findFreeSlots()`, so Google Calendar can combine Momentum's working-hour rules with Google FreeBusy busy intervals without importing scheduling/domain services.
 
 - [ ] **Step 3: Update seed and verification**
 
@@ -102,7 +108,7 @@ Expected: tests and typecheck pass.
 Commit:
 
 ```bash
-git add src/domain/types.ts src/domain/clinic-profile.ts src/application/scheduling/slot-generator.ts src/dev/seed.ts tests/slot-generator.test.ts tests/clinic-profile.test.ts
+git add src/domain/types.ts src/domain/clinic-profile.ts src/application/scheduling/slot-generator.ts src/ports/calendar.ts src/application/scheduling/scheduling-service.ts src/dev/seed.ts tests/slot-generator.test.ts tests/clinic-profile.test.ts tests/scheduling-service.test.ts
 git commit -m "feat: add professional working hours"
 ```
 

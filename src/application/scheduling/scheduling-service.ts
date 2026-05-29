@@ -45,7 +45,8 @@ export class SchedulingService {
       calendarIds: professionals.map((professional) => professional.calendarId),
       from: maxDate(input.from, this.minimumBookableStart(profile)),
       to: input.to,
-      durationMinutes
+      durationMinutes,
+      availabilityContext: buildAvailabilityContext(profile, professionals, service.durationMinutes)
     });
   }
 
@@ -71,7 +72,8 @@ export class SchedulingService {
       calendarIds: [professional.calendarId],
       from: startsAt,
       to: calendarEndsAt,
-      durationMinutes: service.durationMinutes + profile.appointmentRules.bufferMinutes
+      durationMinutes: service.durationMinutes + profile.appointmentRules.bufferMinutes,
+      availabilityContext: buildAvailabilityContext(profile, [professional], service.durationMinutes)
     });
     const exactSlot = findContainingSlot(slots, startsAt, calendarEndsAt);
     if (!exactSlot) {
@@ -176,6 +178,7 @@ export class SchedulingService {
         from: startsAt,
         to: calendarEndsAt,
         durationMinutes: service.durationMinutes + profile.appointmentRules.bufferMinutes,
+        availabilityContext: buildAvailabilityContext(profile, [professional], service.durationMinutes),
         ignoredEventId: appointment.calendarEventId
       });
       const exactSlot = findContainingSlot(slots, startsAt, calendarEndsAt);
@@ -273,4 +276,21 @@ function addMinutes(date: Date, minutes: number) {
 
 function maxDate(first: Date, second: Date) {
   return first > second ? first : second;
+}
+
+function buildAvailabilityContext(
+  profile: ClinicProfile,
+  professionals: ClinicProfile["professionals"],
+  serviceDurationMinutes: number
+) {
+  return {
+    timezone: profile.timezone,
+    professionals: professionals.map((professional) => ({
+      id: professional.id,
+      calendarId: professional.calendarId,
+      workingHours: professional.workingHours
+    })),
+    serviceDurationMinutes,
+    bufferMinutes: profile.appointmentRules.bufferMinutes
+  };
 }

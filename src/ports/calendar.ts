@@ -1,7 +1,22 @@
+import type { WorkingWindow } from "../domain/types.js";
+
 export type CalendarSlot = {
   calendarId: string;
   startsAt: Date;
   endsAt: Date;
+};
+
+export type CalendarAvailabilityProfessional = {
+  id: string;
+  calendarId: string;
+  workingHours: WorkingWindow[];
+};
+
+export type CalendarAvailabilityContext = {
+  timezone: string;
+  professionals: CalendarAvailabilityProfessional[];
+  serviceDurationMinutes: number;
+  bufferMinutes: number;
 };
 
 export type CalendarEventInput = {
@@ -22,6 +37,7 @@ export type FindFreeSlotsInput = {
   from: Date;
   to: Date;
   durationMinutes: number;
+  availabilityContext?: CalendarAvailabilityContext;
   ignoredEventId?: string;
 };
 

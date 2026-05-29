@@ -33,7 +33,7 @@ const workingWindowSchema = z
 const clinicProfileSchema = z.object({
   clinicId: z.string().min(1),
   name: z.string().min(1),
-  timezone: z.string().min(1),
+  timezone: z.string().min(1).refine(isValidTimezone, "Invalid IANA timezone"),
   services: z.array(
     z.object({
       id: z.string().min(1),
@@ -81,4 +81,13 @@ export function parseClinicProfile(input: ClinicProfileInput): ClinicProfile {
 function minutesFromTime(time: string) {
   const [hours, minutes] = time.split(":").map(Number);
   return hours * 60 + minutes;
+}
+
+function isValidTimezone(timezone: string) {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
 }

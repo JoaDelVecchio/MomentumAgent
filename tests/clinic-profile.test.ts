@@ -66,6 +66,41 @@ describe("clinic profile", () => {
     ).toThrow("Service svc_botox references missing professional pro_missing");
   });
 
+  it("rejects an invalid IANA timezone before scheduling uses it", () => {
+    expect(() =>
+      parseClinicProfile({
+        clinicId: "clinic_1",
+        name: "Clinica Demo",
+        timezone: "Not/A_Timezone",
+        services: [
+          {
+            id: "svc_botox",
+            name: "Botox",
+            durationMinutes: 30,
+            priceText: "Desde $120.000",
+            preparation: "Sin preparacion especial.",
+            restrictions: [],
+            professionalIds: ["pro_perez"]
+          }
+        ],
+        professionals: [
+          {
+            id: "pro_perez",
+            name: "Dra. Perez",
+            calendarId: "cal_perez",
+            workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
+          }
+        ],
+        appointmentRules: {
+          minimumNoticeMinutes: 120,
+          cancellationNoticeMinutes: 1440,
+          bufferMinutes: 0
+        },
+        requiredPatientFields: ["fullName"]
+      })
+    ).toThrow("Invalid IANA timezone");
+  });
+
   it("rejects professional working hours with invalid day or time formats", () => {
     const validProfile = {
       clinicId: "clinic_1",

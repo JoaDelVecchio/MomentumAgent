@@ -5,7 +5,7 @@ import { InMemoryRepositories } from "../src/adapters/memory/repositories.js";
 import { SchedulingService } from "../src/application/scheduling/scheduling-service.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
 import { DomainError } from "../src/domain/errors.js";
-import type { CalendarEvent, CalendarEventInput } from "../src/ports/calendar.js";
+import type { CalendarEvent, CalendarEventInput, FindFreeSlotsInput } from "../src/ports/calendar.js";
 
 class BlockingUpdateCalendar extends FakeCalendar {
   private readonly updateReleased: Promise<void>;
@@ -34,6 +34,15 @@ class BlockingUpdateCalendar extends FakeCalendar {
   }
 }
 
+class CapturingFindSlotsCalendar extends FakeCalendar {
+  readonly findFreeSlotsInputs: FindFreeSlotsInput[] = [];
+
+  override async findFreeSlots(input: FindFreeSlotsInput) {
+    this.findFreeSlotsInputs.push(input);
+    return super.findFreeSlots(input);
+  }
+}
+
 function buildContext(calendar = new FakeCalendar(), now = () => new Date("2026-05-29T12:00:00.000Z")) {
   const repos = new InMemoryRepositories();
   const audit = new InMemoryAuditLog();
@@ -55,7 +64,12 @@ function buildContext(calendar = new FakeCalendar(), now = () => new Date("2026-
         }
       ],
       professionals: [
-        { id: "pro_perez", name: "Dra. Perez", calendarId: "cal_perez" },
+        {
+          id: "pro_perez",
+          name: "Dra. Perez",
+          calendarId: "cal_perez",
+          workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
+        },
         { id: "pro_lopez", name: "Dra. Lopez", calendarId: "cal_lopez" }
       ],
       appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 0, bufferMinutes: 0 },
@@ -128,6 +142,43 @@ describe("SchedulingService", () => {
         professionalId: "pro_otra"
       })
     ).rejects.toThrow("Professional pro_otra cannot perform service svc_botox");
+  });
+
+  it("passes scheduling context to the calendar port for provider availability", async () => {
+    const calendar = new CapturingFindSlotsCalendar();
+    const { service } = buildContext(calendar);
+    calendar.seedAvailability("cal_lopez", [
+      { startsAt: new Date("2026-06-01T14:00:00.000Z"), endsAt: new Date("2026-06-01T14:30:00.000Z") }
+    ]);
+
+    await service.findSlots({
+      clinicId: "clinic_1",
+      serviceId: "svc_botox",
+      from: new Date("2026-06-01T12:00:00.000Z"),
+      to: new Date("2026-06-01T15:00:00.000Z")
+    });
+
+    expect(calendar.findFreeSlotsInputs[0]).toMatchObject({
+      calendarIds: ["cal_perez", "cal_lopez"],
+      durationMinutes: 30,
+      availabilityContext: {
+        timezone: "America/Argentina/Buenos_Aires",
+        serviceDurationMinutes: 30,
+        bufferMinutes: 0,
+        professionals: [
+          {
+            id: "pro_perez",
+            calendarId: "cal_perez",
+            workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
+          },
+          {
+            id: "pro_lopez",
+            calendarId: "cal_lopez",
+            workingHours: []
+          }
+        ]
+      }
+    });
   });
 
   it("books a compatible professional slot and audits the action", async () => {
