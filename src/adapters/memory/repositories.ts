@@ -1,0 +1,134 @@
+import type { Appointment, ClinicProfile, Id, Patient } from "../../domain/types.js";
+
+export type Conversation = {
+  id: Id;
+  clinicId: Id;
+  patientId: Id;
+  botPaused: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type PatientInterest = {
+  id: Id;
+  clinicId: Id;
+  patientId: Id;
+  serviceId: Id;
+  professionalId?: Id;
+  preferredFrom: Date;
+  preferredTo: Date;
+  status: "active" | "fulfilled" | "expired";
+};
+
+export class InMemoryRepositories {
+  private clinicProfiles = new Map<Id, ClinicProfile>();
+  private patients = new Map<Id, Patient>();
+  private conversations = new Map<Id, Conversation>();
+  private appointments = new Map<Id, Appointment>();
+  private interests = new Map<Id, PatientInterest>();
+  private optOutWhatsappNumbers = new Set<string>();
+
+  upsertClinicProfile(profile: ClinicProfile) {
+    this.clinicProfiles.set(profile.clinicId, cloneClinicProfile(profile));
+  }
+
+  getClinicProfile(clinicId: Id) {
+    const profile = this.clinicProfiles.get(clinicId);
+    return profile ? cloneClinicProfile(profile) : undefined;
+  }
+
+  upsertPatient(patient: Patient) {
+    this.patients.set(patient.id, clonePatient(patient));
+  }
+
+  getPatient(patientId: Id) {
+    const patient = this.patients.get(patientId);
+    return patient ? clonePatient(patient) : undefined;
+  }
+
+  saveConversation(conversation: Conversation) {
+    this.conversations.set(conversation.id, cloneConversation(conversation));
+  }
+
+  getConversation(conversationId: Id) {
+    const conversation = this.conversations.get(conversationId);
+    return conversation ? cloneConversation(conversation) : undefined;
+  }
+
+  saveAppointment(appointment: Appointment) {
+    this.appointments.set(appointment.id, cloneAppointment(appointment));
+  }
+
+  getAppointment(appointmentId: Id) {
+    const appointment = this.appointments.get(appointmentId);
+    return appointment ? cloneAppointment(appointment) : undefined;
+  }
+
+  listAppointmentsByPatient(patientId: Id) {
+    return [...this.appointments.values()]
+      .filter((appointment) => appointment.patientId === patientId)
+      .map((appointment) => cloneAppointment(appointment));
+  }
+
+  saveInterest(interest: PatientInterest) {
+    this.interests.set(interest.id, clonePatientInterest(interest));
+  }
+
+  listActiveInterests() {
+    return [...this.interests.values()]
+      .filter((interest) => interest.status === "active")
+      .map((interest) => clonePatientInterest(interest));
+  }
+
+  markOptOut(whatsappNumber: string) {
+    this.optOutWhatsappNumbers.add(whatsappNumber);
+  }
+
+  isOptedOut(whatsappNumber: string) {
+    return this.optOutWhatsappNumbers.has(whatsappNumber);
+  }
+}
+
+function cloneClinicProfile(profile: ClinicProfile): ClinicProfile {
+  return {
+    clinicId: profile.clinicId,
+    name: profile.name,
+    timezone: profile.timezone,
+    services: profile.services.map((service) => ({
+      ...service,
+      restrictions: [...service.restrictions],
+      professionalIds: [...service.professionalIds]
+    })),
+    professionals: profile.professionals.map((professional) => ({ ...professional })),
+    appointmentRules: { ...profile.appointmentRules },
+    requiredPatientFields: [...profile.requiredPatientFields]
+  };
+}
+
+function clonePatient(patient: Patient): Patient {
+  return { ...patient };
+}
+
+function cloneConversation(conversation: Conversation): Conversation {
+  return {
+    ...conversation,
+    createdAt: new Date(conversation.createdAt),
+    updatedAt: new Date(conversation.updatedAt)
+  };
+}
+
+function cloneAppointment(appointment: Appointment): Appointment {
+  return {
+    ...appointment,
+    startsAt: new Date(appointment.startsAt),
+    endsAt: new Date(appointment.endsAt)
+  };
+}
+
+function clonePatientInterest(interest: PatientInterest): PatientInterest {
+  return {
+    ...interest,
+    preferredFrom: new Date(interest.preferredFrom),
+    preferredTo: new Date(interest.preferredTo)
+  };
+}
