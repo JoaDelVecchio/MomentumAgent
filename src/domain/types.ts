@@ -14,10 +14,19 @@ export type Service = {
   professionalIds: Id[];
 };
 
+export type WorkingDay = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+export type WorkingWindow = {
+  day: WorkingDay;
+  startTime: string;
+  endTime: string;
+};
+
 export type Professional = {
   id: Id;
   name: string;
   calendarId: Id;
+  workingHours: WorkingWindow[];
 };
 
 export type AppointmentRules = {

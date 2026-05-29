@@ -31,7 +31,20 @@ export function buildDevContainer(options: BuildDevContainerOptions = {}) {
           professionalIds: ["pro_perez"]
         }
       ],
-      professionals: [{ id: "pro_perez", name: "Dra. Perez", calendarId: "cal_perez" }],
+      professionals: [
+        {
+          id: "pro_perez",
+          name: "Dra. Perez",
+          calendarId: "cal_perez",
+          workingHours: [
+            { day: 1, startTime: "09:00", endTime: "17:00" },
+            { day: 2, startTime: "09:00", endTime: "17:00" },
+            { day: 3, startTime: "09:00", endTime: "17:00" },
+            { day: 4, startTime: "09:00", endTime: "17:00" },
+            { day: 5, startTime: "09:00", endTime: "17:00" }
+          ]
+        }
+      ],
       appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 1440, bufferMinutes: 0 },
       requiredPatientFields: ["fullName"]
     })
