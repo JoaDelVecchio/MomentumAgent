@@ -19,10 +19,10 @@ type AppointmentRecord = {
   serviceId: string;
   professionalId: string;
   calendarEventId: string;
+  calendarId: string;
   startsAt: Date;
   endsAt: Date;
   status: string;
-  professional: { calendarId: string };
 };
 
 type ConversationRecord = {
@@ -183,6 +183,7 @@ export class PrismaOperationalRepository implements OperationalRepository {
         serviceId: appointment.serviceId,
         professionalId: appointment.professionalId,
         calendarEventId: appointment.calendarEventId,
+        calendarId: appointment.calendarId,
         startsAt: appointment.startsAt,
         endsAt: appointment.endsAt,
         status: appointment.status
@@ -193,6 +194,7 @@ export class PrismaOperationalRepository implements OperationalRepository {
         serviceId: appointment.serviceId,
         professionalId: appointment.professionalId,
         calendarEventId: appointment.calendarEventId,
+        calendarId: appointment.calendarId,
         startsAt: appointment.startsAt,
         endsAt: appointment.endsAt,
         status: appointment.status
@@ -218,8 +220,7 @@ export class PrismaOperationalRepository implements OperationalRepository {
 
   async getAppointment(appointmentId: Id): Promise<Appointment | undefined> {
     const appointment = await this.prisma.appointment.findUnique({
-      where: { id: appointmentId },
-      include: { professional: { select: { calendarId: true } } }
+      where: { id: appointmentId }
     });
     return appointment ? toAppointment(appointment) : undefined;
   }
@@ -227,7 +228,6 @@ export class PrismaOperationalRepository implements OperationalRepository {
   async listAppointmentsByPatient(patientId: Id): Promise<Appointment[]> {
     const appointments = await this.prisma.appointment.findMany({
       where: { patientId },
-      include: { professional: { select: { calendarId: true } } },
       orderBy: { startsAt: "asc" }
     });
     return appointments.map(toAppointment);
@@ -425,7 +425,7 @@ function toAppointment(record: AppointmentRecord): Appointment {
     serviceId: record.serviceId,
     professionalId: record.professionalId,
     calendarEventId: record.calendarEventId,
-    calendarId: record.professional.calendarId,
+    calendarId: record.calendarId,
     startsAt: record.startsAt,
     endsAt: record.endsAt,
     status: toAppointmentStatus(record.status)

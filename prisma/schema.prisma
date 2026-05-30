@@ -92,6 +92,7 @@ model Appointment {
   serviceId       String
   professionalId  String
   calendarEventId String
+  calendarId      String
   startsAt        DateTime
   endsAt          DateTime
   status          String

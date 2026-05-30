@@ -1,0 +1,1 @@
+ALTER TABLE "Appointment" ADD COLUMN "calendarId" TEXT NOT NULL DEFAULT '';

@@ -334,6 +334,33 @@ describe("PrismaOperationalRepository core state", () => {
     ]);
   });
 
+  it("keeps the appointment calendar id when professional calendar mapping changes", async () => {
+    await repos.upsertPatient({ id: "pat_calendar", whatsappNumber: "+5491111114455" });
+    await repos.saveAppointment({
+      id: "appt_calendar",
+      clinicId: "clinic_1",
+      patientId: "pat_calendar",
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      calendarEventId: "google_evt_calendar",
+      calendarId: "cal_perez_original",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      endsAt: new Date("2026-06-01T13:30:00.000Z"),
+      status: "scheduled"
+    });
+    await repos.upsertClinicProfile(
+      operationalProfile({
+        clinicId: "clinic_1",
+        serviceId: "svc_botox",
+        professionals: [{ id: "pro_perez", calendarId: "cal_perez_new" }]
+      })
+    );
+
+    expect(await repos.getAppointment("appt_calendar")).toEqual(
+      expect.objectContaining({ id: "appt_calendar", calendarId: "cal_perez_original" })
+    );
+  });
+
   it("round-trips active patient interests", async () => {
     await repos.upsertPatient({ id: "pat_interest", whatsappNumber: "+5491111115555" });
     await repos.saveInterest({
