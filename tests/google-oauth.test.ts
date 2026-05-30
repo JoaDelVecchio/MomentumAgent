@@ -1,8 +1,4 @@
 import { PrismaClient } from "@prisma/client";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { InMemoryCalendarCredentialRepository } from "../src/adapters/memory/calendar-auth-repository.js";
 import {
@@ -19,6 +15,7 @@ import {
   readGoogleCalendarConfig,
   type GoogleCalendarConfig
 } from "../src/config/google-calendar.js";
+import { createPrismaTestContext, type PrismaTestContext } from "./helpers/prisma.js";
 
 const googleCalendarScope = "https://www.googleapis.com/auth/calendar.events";
 const googleCalendarFreeBusyScope = "https://www.googleapis.com/auth/calendar.events.freebusy";
@@ -71,13 +68,11 @@ describe("PrismaCalendarCredentialRepository", () => {
   const cipher = new Aes256GcmTokenCipher("01".repeat(32), () => Buffer.alloc(12, 4));
   let prisma: PrismaClient;
   let repository: PrismaCalendarCredentialRepository;
-  let tempDirectory: string;
+  let context: PrismaTestContext;
 
   beforeAll(async () => {
-    tempDirectory = mkdtempSync(join(tmpdir(), "momentum-google-oauth-test-"));
-    const databasePath = join(tempDirectory, "test.db");
-    applySqliteMigrations(databasePath);
-    prisma = new PrismaClient({ datasources: { db: { url: `file:${databasePath}` } } });
+    context = createPrismaTestContext("momentum-google-oauth-test-");
+    prisma = context.prisma;
     repository = new PrismaCalendarCredentialRepository(prisma, cipher);
 
     await prisma.clinic.upsert({
@@ -96,8 +91,7 @@ describe("PrismaCalendarCredentialRepository", () => {
   });
 
   afterAll(async () => {
-    await prisma.$disconnect();
-    rmSync(tempDirectory, { recursive: true, force: true });
+    await context.cleanup();
   });
 
   it("stores encrypted tokens without exposing the raw refresh token string", async () => {
@@ -429,15 +423,4 @@ class FakeGoogleOAuthClient implements GoogleOAuthClient {
     this.tokenCalls.push(input);
     return { tokens: this.tokens };
   }
-}
-
-function applySqliteMigrations(databasePath: string) {
-  const migrationsPath = join(process.cwd(), "prisma", "migrations");
-  const migrationSql = readdirSync(migrationsPath)
-    .filter((entry) => entry !== "migration_lock.toml")
-    .sort()
-    .map((entry) => readFileSync(join(migrationsPath, entry, "migration.sql"), "utf8"))
-    .join("\n");
-
-  execFileSync("sqlite3", [databasePath], { input: migrationSql });
 }

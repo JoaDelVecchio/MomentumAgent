@@ -26,6 +26,7 @@ model Clinic {
   auditEvents               AuditEvent[]
   reactivationAttempts      ReactivationAttempt[]
   calendarConnections       CalendarConnection[]
+  processedWebhookDeliveries ProcessedWebhookDelivery[]
 }
 
 model Service {
@@ -202,4 +203,18 @@ model CalendarConnection {
 
   @@unique([clinicId, provider])
   @@index([provider])
+}
+
+model ProcessedWebhookDelivery {
+  id                String   @id @default(cuid())
+  provider          String
+  idempotencyKey    String
+  clinicId          String
+  conversationId    String?
+  providerMessageId String?
+  processedAt       DateTime @default(now())
+  clinic            Clinic   @relation(fields: [clinicId], references: [id])
+
+  @@unique([provider, idempotencyKey])
+  @@index([clinicId, processedAt])
 }
