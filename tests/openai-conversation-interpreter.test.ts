@@ -1,0 +1,104 @@
+import { describe, expect, it } from "vitest";
+import { OpenAIConversationInterpreter } from "../src/adapters/openai/openai-conversation-interpreter.js";
+import { parseClinicProfile } from "../src/domain/clinic-profile.js";
+
+const profile = parseClinicProfile({
+  clinicId: "clinic_1",
+  name: "Clinica Demo",
+  timezone: "America/Argentina/Buenos_Aires",
+  services: [
+    {
+      id: "svc_botox",
+      name: "Botox",
+      durationMinutes: 30,
+      priceText: "Desde $120.000",
+      preparation: "Evitar alcohol 24 horas antes.",
+      restrictions: ["No se realiza en embarazo."],
+      professionalIds: ["pro_perez"]
+    }
+  ],
+  professionals: [{ id: "pro_perez", name: "Dra. Perez", calendarId: "cal_perez" }],
+  appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 0, bufferMinutes: 0 },
+  requiredPatientFields: ["fullName"]
+});
+
+describe("OpenAIConversationInterpreter", () => {
+  it("returns parsed structured understanding from the OpenAI response", async () => {
+    const client = new FakeOpenAIClient({
+      intent: "book",
+      confidence: 0.92,
+      serviceName: "Botox",
+      professionalPreference: "Dra. Perez",
+      timePreference: "a la tarde",
+      normalizedTimePreference: { daypart: "afternoon" },
+      requestedTopics: ["price"],
+      patientFullName: null,
+      requiresHuman: false,
+      safetyReason: null,
+      reason: "Patient asks for price and booking."
+    });
+
+    const result = await new OpenAIConversationInterpreter({
+      client,
+      model: "gpt-5-mini",
+      timeoutMs: 500
+    }).interpret({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      messageText: "Cuanto sale botox y tenes a la tarde?",
+      now: new Date("2026-05-29T12:00:00.000Z"),
+      clinicProfile: profile
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: "openai",
+        intent: "book",
+        serviceName: "Botox",
+        requestedTopics: ["price"],
+        requiresHuman: false
+      })
+    );
+    expect(client.lastBody?.tools).toEqual([]);
+    expect(JSON.stringify(client.lastBody)).not.toContain("cal_perez");
+  });
+
+  it("falls back when OpenAI returns invalid structured output", async () => {
+    const client = new FakeOpenAIClient(null);
+    const result = await new OpenAIConversationInterpreter({
+      client,
+      model: "gpt-5-mini",
+      timeoutMs: 500
+    }).interpret({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      messageText: "hola",
+      now: new Date("2026-05-29T12:00:00.000Z"),
+      clinicProfile: profile
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: "fallback",
+        intent: "unknown",
+        confidence: 0,
+        requiresHuman: false
+      })
+    );
+  });
+});
+
+class FakeOpenAIClient {
+  lastBody?: any;
+
+  constructor(private readonly parsed: unknown) {}
+
+  responses = {
+    parse: async (body: unknown) => {
+      this.lastBody = body;
+      return { output_parsed: this.parsed };
+    }
+  };
+}
