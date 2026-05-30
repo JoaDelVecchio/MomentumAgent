@@ -13,6 +13,8 @@ node_modules/
 dist/
 build/
 coverage/
+.next/
+tsconfig.tsbuildinfo
 
 # Local databases
 prisma/*.db
