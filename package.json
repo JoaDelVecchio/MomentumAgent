@@ -3,11 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "apps/web"
+  ],
   "scripts": {
     "dev": "tsx src/server.ts",
+    "dev:api": "tsx src/server.ts",
+    "dev:web": "npm --workspace apps/web run dev",
+    "build:web": "npm --workspace apps/web run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "typecheck:web": "npm --workspace apps/web run typecheck",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },
