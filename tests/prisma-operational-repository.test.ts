@@ -296,6 +296,88 @@ describe("PrismaOperationalRepository core state", () => {
     const freshRepos = new PrismaOperationalRepository(prisma);
     expect(await freshRepos.hasProcessedWebhookDelivery("delivery_1")).toBe(true);
   });
+
+  it("generates process-independent appointment ids", async () => {
+    const id = await repos.nextAppointmentId();
+    expect(id).toMatch(/^appt_[0-9a-f-]{36}$/u);
+  });
+
+  it("round-trips appointments by id and patient", async () => {
+    await repos.upsertPatient({ id: "pat_appt", whatsappNumber: "+5491111114444" });
+    await repos.saveAppointment({
+      id: "appt_1",
+      clinicId: "clinic_1",
+      patientId: "pat_appt",
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      calendarEventId: "google_evt_1",
+      calendarId: "cal_perez",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      endsAt: new Date("2026-06-01T13:30:00.000Z"),
+      status: "scheduled"
+    });
+
+    expect(await repos.getAppointment("appt_1")).toEqual({
+      id: "appt_1",
+      clinicId: "clinic_1",
+      patientId: "pat_appt",
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      calendarEventId: "google_evt_1",
+      calendarId: "cal_perez",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      endsAt: new Date("2026-06-01T13:30:00.000Z"),
+      status: "scheduled"
+    });
+    expect(await repos.listAppointmentsByPatient("pat_appt")).toEqual([
+      expect.objectContaining({ id: "appt_1", status: "scheduled" })
+    ]);
+  });
+
+  it("round-trips active patient interests", async () => {
+    await repos.upsertPatient({ id: "pat_interest", whatsappNumber: "+5491111115555" });
+    await repos.saveInterest({
+      id: "interest_1",
+      clinicId: "clinic_1",
+      patientId: "pat_interest",
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      preferredFrom: new Date("2026-06-01T12:00:00.000Z"),
+      preferredTo: new Date("2026-06-01T16:00:00.000Z"),
+      status: "active"
+    });
+    await repos.saveInterest({
+      id: "interest_2",
+      clinicId: "clinic_1",
+      patientId: "pat_interest",
+      serviceId: "svc_botox",
+      preferredFrom: new Date("2026-06-02T12:00:00.000Z"),
+      preferredTo: new Date("2026-06-02T16:00:00.000Z"),
+      status: "fulfilled"
+    });
+
+    expect(await repos.listActiveInterests()).toEqual([
+      expect.objectContaining({ id: "interest_1", professionalId: "pro_perez", status: "active" })
+    ]);
+  });
+
+  it("serializes appointment lock operations in process", async () => {
+    const events: string[] = [];
+
+    await Promise.all([
+      repos.withAppointmentLock("appt_lock", async () => {
+        events.push("first:start");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        events.push("first:end");
+      }),
+      repos.withAppointmentLock("appt_lock", async () => {
+        events.push("second:start");
+        events.push("second:end");
+      })
+    ]);
+
+    expect(events).toEqual(["first:start", "first:end", "second:start", "second:end"]);
+  });
 });
 
 function demoProfile() {

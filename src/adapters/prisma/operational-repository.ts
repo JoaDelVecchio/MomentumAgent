@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import type { Appointment, ClinicProfile, Id, Patient } from "../../domain/types.js";
@@ -11,6 +12,19 @@ import type {
 
 type PatientRecord = { id: string; whatsappNumber: string; fullName: string | null };
 
+type AppointmentRecord = {
+  id: string;
+  clinicId: string;
+  patientId: string;
+  serviceId: string;
+  professionalId: string;
+  calendarEventId: string;
+  startsAt: Date;
+  endsAt: Date;
+  status: string;
+  professional: { calendarId: string };
+};
+
 type ConversationRecord = {
   id: string;
   clinicId: string;
@@ -21,9 +35,19 @@ type ConversationRecord = {
   updatedAt: Date;
 };
 
+type PatientInterestRecord = {
+  id: string;
+  clinicId: string;
+  patientId: string;
+  serviceId: string;
+  professionalId: string | null;
+  preferredFrom: Date;
+  preferredTo: Date;
+  status: string;
+};
+
 export class PrismaOperationalRepository implements OperationalRepository {
   private clinicProfiles = new Map<string, ClinicProfile>();
-  private appointmentCounter = 0;
   private appointmentLocks = new Map<Id, Promise<unknown>>();
   private conversationLocks = new Map<Id, Promise<unknown>>();
   private webhookDeliveryLocks = new Map<string, Promise<unknown>>();
@@ -149,13 +173,35 @@ export class PrismaOperationalRepository implements OperationalRepository {
     return conversation ? toConversation(conversation) : undefined;
   }
 
-  async saveAppointment(_appointment: Appointment): Promise<void> {
-    throw new Error("Prisma appointment persistence is not implemented yet");
+  async saveAppointment(appointment: Appointment): Promise<void> {
+    await this.prisma.appointment.upsert({
+      where: { id: appointment.id },
+      create: {
+        id: appointment.id,
+        clinicId: appointment.clinicId,
+        patientId: appointment.patientId,
+        serviceId: appointment.serviceId,
+        professionalId: appointment.professionalId,
+        calendarEventId: appointment.calendarEventId,
+        startsAt: appointment.startsAt,
+        endsAt: appointment.endsAt,
+        status: appointment.status
+      },
+      update: {
+        clinicId: appointment.clinicId,
+        patientId: appointment.patientId,
+        serviceId: appointment.serviceId,
+        professionalId: appointment.professionalId,
+        calendarEventId: appointment.calendarEventId,
+        startsAt: appointment.startsAt,
+        endsAt: appointment.endsAt,
+        status: appointment.status
+      }
+    });
   }
 
   async nextAppointmentId(): Promise<Id> {
-    this.appointmentCounter += 1;
-    return `appt_${this.appointmentCounter}`;
+    return `appt_${randomUUID()}`;
   }
 
   async withAppointmentLock<T>(appointmentId: Id, operation: () => Promise<T>): Promise<T> {
@@ -170,20 +216,54 @@ export class PrismaOperationalRepository implements OperationalRepository {
     return withKeyedLock(this.webhookDeliveryLocks, idempotencyKey, operation);
   }
 
-  async getAppointment(_appointmentId: Id): Promise<Appointment | undefined> {
-    return undefined;
+  async getAppointment(appointmentId: Id): Promise<Appointment | undefined> {
+    const appointment = await this.prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      include: { professional: { select: { calendarId: true } } }
+    });
+    return appointment ? toAppointment(appointment) : undefined;
   }
 
-  async listAppointmentsByPatient(_patientId: Id): Promise<Appointment[]> {
-    return [];
+  async listAppointmentsByPatient(patientId: Id): Promise<Appointment[]> {
+    const appointments = await this.prisma.appointment.findMany({
+      where: { patientId },
+      include: { professional: { select: { calendarId: true } } },
+      orderBy: { startsAt: "asc" }
+    });
+    return appointments.map(toAppointment);
   }
 
-  async saveInterest(_interest: PatientInterest): Promise<void> {
-    throw new Error("Prisma patient interest persistence is not implemented yet");
+  async saveInterest(interest: PatientInterest): Promise<void> {
+    await this.prisma.patientInterest.upsert({
+      where: { id: interest.id },
+      create: {
+        id: interest.id,
+        clinicId: interest.clinicId,
+        patientId: interest.patientId,
+        serviceId: interest.serviceId,
+        professionalId: interest.professionalId,
+        preferredFrom: interest.preferredFrom,
+        preferredTo: interest.preferredTo,
+        status: interest.status
+      },
+      update: {
+        clinicId: interest.clinicId,
+        patientId: interest.patientId,
+        serviceId: interest.serviceId,
+        professionalId: interest.professionalId,
+        preferredFrom: interest.preferredFrom,
+        preferredTo: interest.preferredTo,
+        status: interest.status
+      }
+    });
   }
 
   async listActiveInterests(): Promise<PatientInterest[]> {
-    return [];
+    const interests = await this.prisma.patientInterest.findMany({
+      where: { status: "active" },
+      orderBy: { preferredFrom: "asc" }
+    });
+    return interests.map(toPatientInterest);
   }
 
   async markOptOut(whatsappNumber: string): Promise<void> {
@@ -337,6 +417,21 @@ function toPatient(record: PatientRecord): Patient {
   };
 }
 
+function toAppointment(record: AppointmentRecord): Appointment {
+  return {
+    id: record.id,
+    clinicId: record.clinicId,
+    patientId: record.patientId,
+    serviceId: record.serviceId,
+    professionalId: record.professionalId,
+    calendarEventId: record.calendarEventId,
+    calendarId: record.professional.calendarId,
+    startsAt: record.startsAt,
+    endsAt: record.endsAt,
+    status: toAppointmentStatus(record.status)
+  };
+}
+
 function toConversation(record: ConversationRecord): Conversation {
   return cloneConversation({
     id: record.id,
@@ -347,6 +442,29 @@ function toConversation(record: ConversationRecord): Conversation {
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
   });
+}
+
+function toPatientInterest(record: PatientInterestRecord): PatientInterest {
+  return {
+    id: record.id,
+    clinicId: record.clinicId,
+    patientId: record.patientId,
+    serviceId: record.serviceId,
+    ...(record.professionalId ? { professionalId: record.professionalId } : {}),
+    preferredFrom: record.preferredFrom,
+    preferredTo: record.preferredTo,
+    status: toInterestStatus(record.status)
+  };
+}
+
+function toAppointmentStatus(status: string): Appointment["status"] {
+  if (status === "scheduled" || status === "cancelled") return status;
+  throw new Error(`Unknown appointment status: ${status}`);
+}
+
+function toInterestStatus(status: string): PatientInterest["status"] {
+  if (status === "active" || status === "fulfilled" || status === "expired") return status;
+  throw new Error(`Unknown patient interest status: ${status}`);
 }
 
 function isPrismaUniqueConflict(error: unknown): boolean {
