@@ -134,9 +134,18 @@ export class SchedulingService {
       if (appointment.startsAt.getTime() - this.now().getTime() < cancellationNoticeMs) {
         throw new DomainError(`Appointment ${appointment.id} cannot be cancelled inside the notice window`);
       }
-      await this.calendar.cancelEvent(appointment.calendarEventId, appointment.calendarId);
       const cancelled: Appointment = { ...appointment, status: "cancelled" };
       await this.repos.saveAppointment(cancelled);
+      try {
+        await this.calendar.cancelEvent(appointment.calendarEventId, appointment.calendarId);
+      } catch (error) {
+        try {
+          await this.repos.saveAppointment(appointment);
+        } catch {
+          // Preserve the original calendar error; rollback failure needs separate operational handling.
+        }
+        throw error;
+      }
       await this.audit.record({
         clinicId: input.clinicId,
         conversationId: input.conversationId,
@@ -199,24 +208,32 @@ export class SchedulingService {
         throw new DomainError("Selected reschedule slot is no longer available");
       }
 
-      await this.updateCalendarEvent(
-        appointment.calendarEventId,
-        {
-          calendarId: eventCalendarId,
-          summary: `${service.name} - ${appointment.patientId}`,
-          startsAt,
-          endsAt: calendarEndsAt,
-          metadata: {
-            appointmentId: appointment.id,
-            patientId: appointment.patientId,
-            serviceId: appointment.serviceId
-          }
-        },
-        "Selected reschedule slot is no longer available"
-      );
-
       const updated: Appointment = { ...appointment, startsAt, endsAt };
       await this.repos.saveAppointment(updated);
+      try {
+        await this.updateCalendarEvent(
+          appointment.calendarEventId,
+          {
+            calendarId: eventCalendarId,
+            summary: `${service.name} - ${appointment.patientId}`,
+            startsAt,
+            endsAt: calendarEndsAt,
+            metadata: {
+              appointmentId: appointment.id,
+              patientId: appointment.patientId,
+              serviceId: appointment.serviceId
+            }
+          },
+          "Selected reschedule slot is no longer available"
+        );
+      } catch (error) {
+        try {
+          await this.repos.saveAppointment(appointment);
+        } catch {
+          // Preserve the original calendar error; rollback failure needs separate operational handling.
+        }
+        throw error;
+      }
       await this.audit.record({
         clinicId: input.clinicId,
         conversationId: input.conversationId,
