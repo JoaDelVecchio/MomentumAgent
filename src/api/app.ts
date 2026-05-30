@@ -1,11 +1,15 @@
 import Fastify from "fastify";
 import type { GoogleOAuthService } from "../adapters/google/google-oauth.js";
+import type { CalendarProvider } from "../dev/seed.js";
+import type { CalendarPort } from "../ports/calendar.js";
 import { registerGoogleCalendarRoutes } from "./google-calendar-routes.js";
 import { registerRoutes } from "./routes.js";
 
 type BuildAppOptions = {
   enableSimulationRoutes?: boolean;
   simulationNow?: Date;
+  calendarProvider?: CalendarProvider;
+  simulationCalendar?: CalendarPort;
   googleCalendarOAuthService?: GoogleOAuthService;
   googleCalendarSetupToken?: string;
 };
@@ -18,7 +22,11 @@ export function buildApp(options: BuildAppOptions = {}) {
   });
 
   if (options.enableSimulationRoutes) {
-    registerRoutes(app, { now: options.simulationNow });
+    registerRoutes(app, {
+      now: options.simulationNow,
+      calendarProvider: options.calendarProvider,
+      calendar: options.simulationCalendar
+    });
   }
 
   if (options.googleCalendarOAuthService) {

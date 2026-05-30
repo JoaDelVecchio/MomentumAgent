@@ -48,6 +48,13 @@ export class CalendarAvailabilityError extends Error {
   }
 }
 
+export class CalendarInfrastructureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CalendarInfrastructureError";
+  }
+}
+
 export interface CalendarPort {
   findFreeSlots(input: FindFreeSlotsInput): Promise<CalendarSlot[]>;
   createEvent(input: CalendarEventInput): Promise<CalendarEvent>;

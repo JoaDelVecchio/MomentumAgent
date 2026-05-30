@@ -2,8 +2,9 @@ import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import type { GoogleCalendarConfig } from "../../config/google-calendar.js";
 import type { CalendarCredentialRepository } from "../../ports/calendar-auth.js";
+import { CalendarInfrastructureError } from "../../ports/calendar.js";
 
-export class GoogleCalendarFreeBusyError extends Error {
+export class GoogleCalendarFreeBusyError extends CalendarInfrastructureError {
   constructor(calendarId: string) {
     super(`Google Calendar FreeBusy failed for calendar ${calendarId}`);
     this.name = "GoogleCalendarFreeBusyError";
@@ -221,7 +222,9 @@ export class GoogleCalendarApiClient implements GoogleCalendarClient {
       provider: "google"
     });
     if (!credentials) {
-      throw new Error(`Google Calendar credentials not found for clinic ${this.options.clinicId}`);
+      throw new CalendarInfrastructureError(
+        `Google Calendar credentials not found for clinic ${this.options.clinicId}`
+      );
     }
 
     this.authClient.setCredentials({

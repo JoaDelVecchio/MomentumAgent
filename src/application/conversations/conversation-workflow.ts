@@ -1,6 +1,7 @@
 import type { Conversation, InMemoryRepositories, PendingBooking } from "../../adapters/memory/repositories.js";
 import type { Appointment, ClinicProfile, Service } from "../../domain/types.js";
 import type { AuditLogPort } from "../../ports/audit-log.js";
+import { CalendarInfrastructureError } from "../../ports/calendar.js";
 import type { SchedulingService } from "../scheduling/scheduling-service.js";
 import { interpretIntent, normalizeText } from "./intent.js";
 
@@ -192,7 +193,10 @@ export class ConversationWorkflow {
           ? `Turno reprogramado para ${appointment.startsAt.toISOString()}. Te vamos a enviar el recordatorio antes del turno.`
           : `Turno confirmado para ${appointment.startsAt.toISOString()}. Te vamos a enviar el recordatorio antes del turno.`
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof CalendarInfrastructureError) {
+        throw error;
+      }
       this.clearPendingBooking(input.conversationId);
       return {
         kind: "reply",
@@ -266,7 +270,10 @@ export class ConversationWorkflow {
       });
 
       return { kind: "reply", text: `Turno cancelado: ${cancelled.startsAt.toISOString()}.` };
-    } catch {
+    } catch (error) {
+      if (error instanceof CalendarInfrastructureError) {
+        throw error;
+      }
       return { kind: "reply", text: "No pude cancelar ese turno automaticamente. Te derivo con recepcion." };
     }
   }
