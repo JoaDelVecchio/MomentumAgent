@@ -30,7 +30,7 @@ model Clinic {
 }
 
 model Service {
-  id                   String                @id
+  id                   String
   clinicId             String
   name                 String
   durationMinutes      Int
@@ -42,12 +42,12 @@ model Service {
   appointments         Appointment[]
   patientInterests     PatientInterest[]
 
-  @@unique([clinicId, id])
+  @@id([clinicId, id])
   @@index([clinicId])
 }
 
 model Professional {
-  id                   String                @id
+  id                   String
   clinicId             String
   name                 String
   calendarId           String
@@ -56,7 +56,7 @@ model Professional {
   appointments         Appointment[]
   patientInterests     PatientInterest[]
 
-  @@unique([clinicId, id])
+  @@id([clinicId, id])
   @@unique([clinicId, calendarId])
   @@index([clinicId])
 }

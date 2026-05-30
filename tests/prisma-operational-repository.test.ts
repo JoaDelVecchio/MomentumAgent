@@ -140,6 +140,97 @@ describe("PrismaOperationalRepository core state", () => {
     expect(await repos.getClinicProfile("clinic_1")).toEqual(demoProfile());
   });
 
+  it("persists same service and professional ids independently per clinic", async () => {
+    await repos.upsertClinicProfile(
+      operationalProfile({
+        clinicId: "clinic_shared_a",
+        serviceId: "svc_shared",
+        professionals: [{ id: "pro_shared", calendarId: "cal_shared_a" }]
+      })
+    );
+    await repos.upsertClinicProfile(
+      operationalProfile({
+        clinicId: "clinic_shared_b",
+        serviceId: "svc_shared",
+        professionals: [{ id: "pro_shared", calendarId: "cal_shared_b" }]
+      })
+    );
+
+    await expect(
+      prisma.service.findMany({
+        where: { id: "svc_shared" },
+        orderBy: { clinicId: "asc" },
+        select: { clinicId: true, id: true }
+      })
+    ).resolves.toEqual([
+      { clinicId: "clinic_shared_a", id: "svc_shared" },
+      { clinicId: "clinic_shared_b", id: "svc_shared" }
+    ]);
+    await expect(
+      prisma.professional.findMany({
+        where: { id: "pro_shared" },
+        orderBy: { clinicId: "asc" },
+        select: { clinicId: true, id: true }
+      })
+    ).resolves.toEqual([
+      { clinicId: "clinic_shared_a", id: "pro_shared" },
+      { clinicId: "clinic_shared_b", id: "pro_shared" }
+    ]);
+  });
+
+  it("syncs service-professional links when a clinic profile changes", async () => {
+    await repos.upsertClinicProfile(
+      operationalProfile({
+        clinicId: "clinic_links",
+        serviceId: "svc_links",
+        professionals: [
+          { id: "pro_links_a", calendarId: "cal_links_a" },
+          { id: "pro_links_b", calendarId: "cal_links_b" }
+        ]
+      })
+    );
+    await repos.upsertClinicProfile(
+      operationalProfile({
+        clinicId: "clinic_links",
+        serviceId: "svc_links",
+        serviceProfessionalIds: ["pro_links_a"],
+        professionals: [
+          { id: "pro_links_a", calendarId: "cal_links_a" },
+          { id: "pro_links_b", calendarId: "cal_links_b" }
+        ]
+      })
+    );
+
+    await expect(
+      prisma.serviceProfessional.findMany({
+        where: { clinicId: "clinic_links", serviceId: "svc_links" },
+        orderBy: { professionalId: "asc" },
+        select: { professionalId: true }
+      })
+    ).resolves.toEqual([{ professionalId: "pro_links_a" }]);
+  });
+
+  it("does not update the profile cache when profile database sync fails", async () => {
+    const persisted = operationalProfile({
+      clinicId: "clinic_cache",
+      serviceId: "svc_cache",
+      professionals: [{ id: "pro_cache_a", calendarId: "cal_cache_a" }]
+    });
+    const invalid = operationalProfile({
+      clinicId: "clinic_cache",
+      serviceId: "svc_cache",
+      professionals: [
+        { id: "pro_cache_a", calendarId: "cal_cache_duplicate" },
+        { id: "pro_cache_b", calendarId: "cal_cache_duplicate" }
+      ]
+    });
+
+    await repos.upsertClinicProfile(persisted);
+    await expect(repos.upsertClinicProfile(invalid)).rejects.toThrow();
+
+    expect(await repos.getClinicProfile("clinic_cache")).toEqual(persisted);
+  });
+
   it("round-trips patients and conversations with pending booking", async () => {
     await repos.upsertPatient({ id: "pat_1", whatsappNumber: "+5491111111111", fullName: "Ana Gomez" });
     await repos.saveConversation({
@@ -231,6 +322,38 @@ function demoProfile() {
         workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
       }
     ],
+    appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 1440, bufferMinutes: 0 },
+    requiredPatientFields: ["fullName"]
+  });
+}
+
+function operationalProfile(input: {
+  clinicId: string;
+  serviceId: string;
+  professionals: Array<{ id: string; calendarId: string; name?: string }>;
+  serviceProfessionalIds?: string[];
+}) {
+  return parseClinicProfile({
+    clinicId: input.clinicId,
+    name: "Clinica Demo",
+    timezone: "America/Argentina/Buenos_Aires",
+    services: [
+      {
+        id: input.serviceId,
+        name: "Botox",
+        durationMinutes: 30,
+        priceText: "Desde $120.000",
+        preparation: "Evitar alcohol 24 horas antes.",
+        restrictions: ["Momentum no brinda diagnostico medico por WhatsApp."],
+        professionalIds: input.serviceProfessionalIds ?? input.professionals.map((professional) => professional.id)
+      }
+    ],
+    professionals: input.professionals.map((professional) => ({
+      id: professional.id,
+      name: professional.name ?? "Dra. Demo",
+      calendarId: professional.calendarId,
+      workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
+    })),
     appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 1440, bufferMinutes: 0 },
     requiredPatientFields: ["fullName"]
   });

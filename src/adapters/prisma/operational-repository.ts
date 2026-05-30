@@ -31,88 +31,70 @@ export class PrismaOperationalRepository implements OperationalRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
   async upsertClinicProfile(profile: ClinicProfile): Promise<void> {
-    this.clinicProfiles.set(profile.clinicId, cloneClinicProfile(profile));
-
-    await this.prisma.clinic.upsert({
-      where: { id: profile.clinicId },
-      create: {
-        id: profile.clinicId,
-        name: profile.name,
-        timezone: profile.timezone,
-        minimumNoticeMinutes: profile.appointmentRules.minimumNoticeMinutes,
-        cancellationNoticeMinutes: profile.appointmentRules.cancellationNoticeMinutes,
-        bufferMinutes: profile.appointmentRules.bufferMinutes,
-        requiredPatientFieldsJson: JSON.stringify(profile.requiredPatientFields)
-      },
-      update: {
-        name: profile.name,
-        timezone: profile.timezone,
-        minimumNoticeMinutes: profile.appointmentRules.minimumNoticeMinutes,
-        cancellationNoticeMinutes: profile.appointmentRules.cancellationNoticeMinutes,
-        bufferMinutes: profile.appointmentRules.bufferMinutes,
-        requiredPatientFieldsJson: JSON.stringify(profile.requiredPatientFields)
-      }
-    });
-
-    for (const service of profile.services) {
-      await this.prisma.service.upsert({
-        where: { id: service.id },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.clinic.upsert({
+        where: { id: profile.clinicId },
         create: {
-          id: service.id,
-          clinicId: profile.clinicId,
-          name: service.name,
-          durationMinutes: service.durationMinutes,
-          priceText: service.priceText,
-          preparation: service.preparation,
-          restrictionsJson: JSON.stringify(service.restrictions)
+          id: profile.clinicId,
+          name: profile.name,
+          timezone: profile.timezone,
+          minimumNoticeMinutes: profile.appointmentRules.minimumNoticeMinutes,
+          cancellationNoticeMinutes: profile.appointmentRules.cancellationNoticeMinutes,
+          bufferMinutes: profile.appointmentRules.bufferMinutes,
+          requiredPatientFieldsJson: JSON.stringify(profile.requiredPatientFields)
         },
         update: {
-          clinicId: profile.clinicId,
-          name: service.name,
-          durationMinutes: service.durationMinutes,
-          priceText: service.priceText,
-          preparation: service.preparation,
-          restrictionsJson: JSON.stringify(service.restrictions)
+          name: profile.name,
+          timezone: profile.timezone,
+          minimumNoticeMinutes: profile.appointmentRules.minimumNoticeMinutes,
+          cancellationNoticeMinutes: profile.appointmentRules.cancellationNoticeMinutes,
+          bufferMinutes: profile.appointmentRules.bufferMinutes,
+          requiredPatientFieldsJson: JSON.stringify(profile.requiredPatientFields)
         }
       });
-    }
 
-    for (const professional of profile.professionals) {
-      await this.prisma.professional.upsert({
-        where: { id: professional.id },
-        create: {
-          id: professional.id,
-          clinicId: profile.clinicId,
-          name: professional.name,
-          calendarId: professional.calendarId
-        },
-        update: {
-          clinicId: profile.clinicId,
-          name: professional.name,
-          calendarId: professional.calendarId
-        }
-      });
-    }
-
-    for (const service of profile.services) {
-      for (const professionalId of service.professionalIds) {
-        await this.prisma.serviceProfessional.upsert({
-          where: {
-            clinicId_serviceId_professionalId: {
-              clinicId: profile.clinicId,
-              serviceId: service.id,
-              professionalId
-            }
-          },
+      for (const service of profile.services) {
+        await tx.service.upsert({
+          where: { clinicId_id: { clinicId: profile.clinicId, id: service.id } },
           create: {
+            id: service.id,
             clinicId: profile.clinicId,
-            serviceId: service.id,
-            professionalId
+            name: service.name,
+            durationMinutes: service.durationMinutes,
+            priceText: service.priceText,
+            preparation: service.preparation,
+            restrictionsJson: JSON.stringify(service.restrictions)
           },
-          update: {}
+          update: {
+            name: service.name,
+            durationMinutes: service.durationMinutes,
+            priceText: service.priceText,
+            preparation: service.preparation,
+            restrictionsJson: JSON.stringify(service.restrictions)
+          }
         });
       }
-    }
+
+      for (const professional of profile.professionals) {
+        await tx.professional.upsert({
+          where: { clinicId_id: { clinicId: profile.clinicId, id: professional.id } },
+          create: {
+            id: professional.id,
+            clinicId: profile.clinicId,
+            name: professional.name,
+            calendarId: professional.calendarId
+          },
+          update: {
+            name: professional.name,
+            calendarId: professional.calendarId
+          }
+        });
+      }
+
+      await syncServiceProfessionalLinks(tx, profile);
+    });
+
+    this.clinicProfiles.set(profile.clinicId, cloneClinicProfile(profile));
   }
 
   async getClinicProfile(clinicId: Id): Promise<ClinicProfile | undefined> {
@@ -237,6 +219,58 @@ export class PrismaOperationalRepository implements OperationalRepository {
     } catch (error) {
       if (isPrismaUniqueConflict(error)) return;
       throw error;
+    }
+  }
+}
+
+async function syncServiceProfessionalLinks(tx: Prisma.TransactionClient, profile: ClinicProfile): Promise<void> {
+  const serviceIds = profile.services.map((service) => service.id);
+  const professionalIds = profile.professionals.map((professional) => professional.id);
+
+  if (serviceIds.length === 0 || professionalIds.length === 0) {
+    await tx.serviceProfessional.deleteMany({ where: { clinicId: profile.clinicId } });
+    return;
+  }
+
+  await tx.serviceProfessional.deleteMany({
+    where: {
+      clinicId: profile.clinicId,
+      OR: [{ serviceId: { notIn: serviceIds } }, { professionalId: { notIn: professionalIds } }]
+    }
+  });
+
+  for (const service of profile.services) {
+    if (service.professionalIds.length === 0) {
+      await tx.serviceProfessional.deleteMany({
+        where: { clinicId: profile.clinicId, serviceId: service.id }
+      });
+      continue;
+    }
+
+    await tx.serviceProfessional.deleteMany({
+      where: {
+        clinicId: profile.clinicId,
+        serviceId: service.id,
+        professionalId: { notIn: service.professionalIds }
+      }
+    });
+
+    for (const professionalId of service.professionalIds) {
+      await tx.serviceProfessional.upsert({
+        where: {
+          clinicId_serviceId_professionalId: {
+            clinicId: profile.clinicId,
+            serviceId: service.id,
+            professionalId
+          }
+        },
+        create: {
+          clinicId: profile.clinicId,
+          serviceId: service.id,
+          professionalId
+        },
+        update: {}
+      });
     }
   }
 }
