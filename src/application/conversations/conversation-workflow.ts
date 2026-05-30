@@ -114,7 +114,7 @@ export class ConversationWorkflow {
       conversationId: input.conversationId
     });
     if (conversation) {
-      await this.repos.saveConversation({ ...conversation, botPaused: true, updatedAt: new Date() });
+      await this.repos.saveConversation({ ...conversation, botPaused: true, updatedAt: this.now() });
     }
     return { kind: "handoff", text: "Te derivo con recepcion para que puedan ayudarte por este mismo chat." };
   }

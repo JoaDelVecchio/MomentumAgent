@@ -19,6 +19,10 @@ export function buildFaqResponse(
     return undefined;
   }
 
+  if (understanding.requestedTopics.includes("other")) {
+    return undefined;
+  }
+
   if (!hasAllRequestedServiceFacts(service, understanding.requestedTopics)) {
     return undefined;
   }

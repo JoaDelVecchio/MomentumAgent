@@ -113,6 +113,38 @@ describe("ConversationWorkflow with AI understanding", () => {
     ).toBeUndefined();
   });
 
+  it("does not return partial service FAQ when a requested topic is unsupported", () => {
+    const profile = parseClinicProfile({
+      clinicId: "clinic_1",
+      name: "Clinica Demo",
+      timezone: "America/Argentina/Buenos_Aires",
+      services: [
+        {
+          id: "svc_botox",
+          name: "Botox",
+          durationMinutes: 30,
+          priceText: "Desde $120.000",
+          preparation: "Evitar alcohol 24 horas antes.",
+          restrictions: ["No se realiza en embarazo."],
+          professionalIds: ["pro_perez"]
+        }
+      ],
+      professionals: [{ id: "pro_perez", name: "Dra. Perez", calendarId: "cal_perez" }],
+      appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 0, bufferMinutes: 0 },
+      requiredPatientFields: ["fullName"]
+    });
+
+    expect(
+      buildFaqResponse(
+        profile,
+        understanding({
+          serviceName: "Botox",
+          requestedTopics: ["price", "other"]
+        })
+      )
+    ).toBeUndefined();
+  });
+
   it("answers service FAQ from configured clinic data only", async () => {
     const { workflow } = buildContext(
       new FakeInterpreter(
@@ -189,6 +221,11 @@ describe("ConversationWorkflow with AI understanding", () => {
       kind: "handoff",
       text: "Te derivo con recepcion para que puedan ayudarte por este mismo chat."
     });
-    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.botPaused).toBe(true);
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })).toEqual(
+      expect.objectContaining({
+        botPaused: true,
+        updatedAt: new Date("2026-05-29T12:00:00.000Z")
+      })
+    );
   });
 });
