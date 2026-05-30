@@ -49,7 +49,9 @@ export function registerGoogleCalendarOnboardingRoutes(
       });
     } catch (error) {
       if (error instanceof GoogleCalendarOnboardingError) {
-        return reply.status(409).send({ error: error.code });
+        return reply
+          .status(statusForGoogleCalendarOnboardingError(error))
+          .send({ error: error.code });
       }
       throw error;
     }
@@ -69,9 +71,24 @@ export function registerGoogleCalendarOnboardingRoutes(
       return reply.send({ calendars: await options.service.listCalendars(params.data.clinicId) });
     } catch (error) {
       if (error instanceof GoogleCalendarOnboardingError) {
-        return reply.status(409).send({ error: error.code });
+        return reply
+          .status(statusForGoogleCalendarOnboardingError(error))
+          .send({ error: error.code });
       }
       throw error;
     }
   });
+}
+
+function statusForGoogleCalendarOnboardingError(error: GoogleCalendarOnboardingError): number {
+  switch (error.code) {
+    case "google_calendar_not_connected":
+    case "google_calendar_reconnect_required":
+    case "google_calendar_calendar_not_bookable":
+      return 409;
+    case "google_calendar_oauth_not_configured":
+      return 503;
+    default:
+      return 500;
+  }
 }
