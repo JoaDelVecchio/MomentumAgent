@@ -41,9 +41,14 @@ export class SchedulingService {
     });
 
     const durationMinutes = service.durationMinutes + profile.appointmentRules.bufferMinutes;
+    const from = maxDate(input.from, this.minimumBookableStart(profile));
+    if (from >= input.to) {
+      return [];
+    }
+
     return this.calendar.findFreeSlots({
       calendarIds: professionals.map((professional) => professional.calendarId),
-      from: maxDate(input.from, this.minimumBookableStart(profile)),
+      from,
       to: input.to,
       durationMinutes,
       availabilityContext: buildAvailabilityContext(profile, professionals, service.durationMinutes)

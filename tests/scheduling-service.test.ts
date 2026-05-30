@@ -226,6 +226,21 @@ describe("SchedulingService", () => {
     });
   });
 
+  it("returns no slots without querying the calendar when minimum notice inverts the search window", async () => {
+    const calendar = new CapturingFindSlotsCalendar();
+    const { service } = buildContext(calendar, () => new Date("2026-06-01T12:00:00.000Z"));
+
+    const slots = await service.findSlots({
+      clinicId: "clinic_1",
+      serviceId: "svc_botox",
+      from: new Date("2026-06-01T00:00:00.000Z"),
+      to: new Date("2026-06-01T10:00:00.000Z")
+    });
+
+    expect(slots).toEqual([]);
+    expect(calendar.findFreeSlotsInputs).toEqual([]);
+  });
+
   it("books a compatible professional slot and audits the action", async () => {
     const { repos, audit, service } = buildContext();
 
