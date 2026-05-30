@@ -174,31 +174,7 @@ describe("onboarding routes", () => {
       method: "PUT",
       url: "/internal/onboarding/clinics/clinic_1/profile",
       headers: { authorization: "Bearer secret" },
-      payload: {
-        name: "Clinica Demo",
-        timezone: "America/Argentina/Buenos_Aires",
-        services: [
-          {
-            id: "svc_botox",
-            name: "Botox",
-            durationMinutes: 30,
-            priceText: "Desde $120.000",
-            preparation: "Evitar alcohol 24 horas antes.",
-            restrictions: [],
-            professionalIds: ["pro_perez"]
-          }
-        ],
-        professionals: [
-          {
-            id: "pro_perez",
-            name: "Dra. Perez",
-            calendarId: "cal_perez",
-            workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
-          }
-        ],
-        appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 1440, bufferMinutes: 0 },
-        requiredPatientFields: ["fullName"]
-      }
+      payload: clinicProfilePayload()
     });
 
     expect(response.statusCode).toBe(200);
@@ -206,6 +182,43 @@ describe("onboarding routes", () => {
     expect(await context.operational.getClinicProfile("clinic_1")).toEqual(
       expect.objectContaining({ clinicId: "clinic_1", services: [expect.objectContaining({ id: "svc_botox" })] })
     );
+    await app.close();
+  });
+
+  it("rejects invalid clinic profiles through internal onboarding", async () => {
+    const context = buildContext();
+    const app = buildApp({ onboarding: { service: context.service, adminToken: "secret" } });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/internal/onboarding/clinics/clinic_1/profile",
+      headers: { authorization: "Bearer secret" },
+      payload: { ...clinicProfilePayload(), timezone: "Argentina" }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "invalid_clinic_profile" });
+    expect(await context.operational.getClinicProfile("clinic_1")).toBeUndefined();
+    await app.close();
+  });
+
+  it("uses the path clinic id when profile payload includes a different clinic id", async () => {
+    const context = buildContext();
+    const app = buildApp({ onboarding: { service: context.service, adminToken: "secret" } });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/internal/onboarding/clinics/clinic_1/profile",
+      headers: { authorization: "Bearer secret" },
+      payload: { ...clinicProfilePayload(), clinicId: "client_supplied" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ profile: expect.objectContaining({ clinicId: "clinic_1" }) });
+    expect(await context.operational.getClinicProfile("clinic_1")).toEqual(
+      expect.objectContaining({ clinicId: "clinic_1" })
+    );
+    expect(await context.operational.getClinicProfile("client_supplied")).toBeUndefined();
     await app.close();
   });
 
@@ -261,5 +274,33 @@ function manualClinicPayload() {
     city: "Buenos Aires",
     country: "Argentina",
     source: "presencial"
+  };
+}
+
+function clinicProfilePayload() {
+  return {
+    name: "Clinica Demo",
+    timezone: "America/Argentina/Buenos_Aires",
+    services: [
+      {
+        id: "svc_botox",
+        name: "Botox",
+        durationMinutes: 30,
+        priceText: "Desde $120.000",
+        preparation: "Evitar alcohol 24 horas antes.",
+        restrictions: [],
+        professionalIds: ["pro_perez"]
+      }
+    ],
+    professionals: [
+      {
+        id: "pro_perez",
+        name: "Dra. Perez",
+        calendarId: "cal_perez",
+        workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
+      }
+    ],
+    appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 1440, bufferMinutes: 0 },
+    requiredPatientFields: ["fullName"]
   };
 }
