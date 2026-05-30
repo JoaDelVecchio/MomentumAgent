@@ -54,7 +54,9 @@ export type ClinicSetupRecord = {
   updatedAt: Date;
 };
 
-export type ClinicSetupUpsertInput = Omit<ClinicSetupRecord, "createdAt">;
+export type ClinicSetupUpsertInput = Omit<ClinicSetupRecord, "createdAt"> & {
+  clinicName?: string;
+};
 
 export type ClinicKnowledgeCategory =
   | "payment_methods"

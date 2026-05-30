@@ -100,7 +100,7 @@ describe("PrismaOnboardingRepository", () => {
     ).resolves.toEqual({
       id: "clinic_converted_before_setup",
       leadId: first.id,
-      name: "clinic_converted_before_setup",
+      name: "Clinica Norte",
       timezone: "America/Argentina/Buenos_Aires",
       requiredPatientFieldsJson: JSON.stringify(["fullName"]),
       lifecycleState: "setup",
@@ -109,9 +109,13 @@ describe("PrismaOnboardingRepository", () => {
   });
 
   it("upserts clinic setup metadata on Clinic, preserves createdAt, updates mutable fields, and lists newest updated first", async () => {
-    const initial = await repo.upsertClinicSetup(setupInput("clinic_setup_a", "2026-06-01T12:00:00.000Z"));
+    const initial = await repo.upsertClinicSetup({
+      ...setupInput("clinic_setup_a", "2026-06-01T12:00:00.000Z"),
+      clinicName: "Clinica Demo"
+    });
     const second = await repo.upsertClinicSetup({
       ...setupInput("clinic_setup_b", "2026-06-01T12:05:00.000Z"),
+      clinicName: "Clinica Sur",
       primaryContactName: "Bruno Owner",
       paymentStatus: "trial"
     });
@@ -133,6 +137,9 @@ describe("PrismaOnboardingRepository", () => {
         updatedAt: new Date("2026-06-01T12:10:00.000Z")
       })
     );
+    await expect(
+      prisma.clinic.findUnique({ where: { id: "clinic_setup_a" }, select: { name: true } })
+    ).resolves.toEqual({ name: "Clinica Demo" });
     await expect(repo.getClinicSetup("missing_clinic")).resolves.toBeUndefined();
     await expect(repo.listClinicSetups()).resolves.toEqual([
       expect.objectContaining({ clinicId: "clinic_setup_a", updatedAt: new Date("2026-06-01T12:10:00.000Z") }),

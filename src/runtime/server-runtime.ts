@@ -21,7 +21,6 @@ import { SchedulingService } from "../application/scheduling/scheduling-service.
 import { readAIConfig, type AIConfig } from "../config/ai.js";
 import { readGoogleCalendarConfig, type GoogleCalendarConfig } from "../config/google-calendar.js";
 import type { WhatsAppConfig } from "../config/whatsapp.js";
-import { buildDemoClinicProfile } from "../dev/demo-clinic-profile.js";
 import { buildDefaultCalendar, type CalendarProvider } from "../dev/seed.js";
 import type { ClinicActivationGuard } from "../ports/activation.js";
 import type { CalendarPort } from "../ports/calendar.js";
@@ -33,6 +32,14 @@ import type {
 
 type GoogleOAuthClientFactory = (config: GoogleCalendarConfig) => GoogleOAuthClient;
 
+const MINIMAL_RUNTIME_CLINIC_DEFAULTS = {
+  timezone: "America/Argentina/Buenos_Aires",
+  minimumNoticeMinutes: 0,
+  cancellationNoticeMinutes: 1440,
+  bufferMinutes: 0,
+  requiredPatientFieldsJson: JSON.stringify(["fullName"])
+} as const;
+
 export async function buildGoogleCalendarRuntime(input: {
   prisma: PrismaClient;
   env?: NodeJS.ProcessEnv;
@@ -41,7 +48,7 @@ export async function buildGoogleCalendarRuntime(input: {
   const env = input.env ?? process.env;
   const config = readGoogleCalendarConfig(env);
   const clinicId = readRuntimeClinicId(env);
-  await seedRuntimeClinicProfile(input.prisma, clinicId);
+  await ensureMinimalRuntimeClinic(input.prisma, clinicId);
 
   const persistedCredentials = new PrismaCalendarCredentialRepository(
     input.prisma,
@@ -74,7 +81,6 @@ export async function buildWhatsAppRuntime(input: {
 }) {
   const clinicId = input.clinicId ?? readRuntimeClinicId();
   const repos = new PrismaOperationalRepository(input.prisma);
-  await repos.upsertClinicProfile(buildDemoClinicProfile(clinicId));
   const audit = new PrismaAuditLog(input.prisma);
   const calendar = input.calendar ?? buildDefaultCalendar(input.calendarProvider);
   const provider = new KapsoWhatsAppProvider({
@@ -130,11 +136,6 @@ function buildConversationInterpreter(config: AIConfig): ConversationInterpreter
   });
 }
 
-export async function seedRuntimeClinicProfile(prisma: PrismaClient, clinicId: string) {
-  const repos = new PrismaOperationalRepository(prisma);
-  await repos.upsertClinicProfile(buildDemoClinicProfile(clinicId));
-}
-
 export function readRuntimeClinicId(env: NodeJS.ProcessEnv = process.env) {
   return env.SIMULATION_CLINIC_ID ?? "clinic_1";
 }
@@ -154,11 +155,23 @@ class SeedingCalendarCredentialRepository implements CalendarCredentialRepositor
   ) {}
 
   async save(input: CalendarCredentialInput) {
-    await seedRuntimeClinicProfile(this.prisma, input.clinicId);
+    await ensureMinimalRuntimeClinic(this.prisma, input.clinicId);
     return this.delegate.save(input);
   }
 
   async get(lookup: CalendarCredentialLookup) {
     return this.delegate.get(lookup);
   }
+}
+
+async function ensureMinimalRuntimeClinic(prisma: PrismaClient, clinicId: string) {
+  await prisma.clinic.upsert({
+    where: { id: clinicId },
+    create: {
+      id: clinicId,
+      name: clinicId,
+      ...MINIMAL_RUNTIME_CLINIC_DEFAULTS
+    },
+    update: {}
+  });
 }

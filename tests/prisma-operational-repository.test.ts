@@ -176,6 +176,48 @@ describe("PrismaOperationalRepository core state", () => {
     });
   });
 
+  it("returns undefined for minimal clinic rows without services or professionals", async () => {
+    await prisma.clinic.create({
+      data: {
+        id: "clinic_minimal_only",
+        name: "Clinica Minimal",
+        timezone: "America/Argentina/Buenos_Aires",
+        minimumNoticeMinutes: 0,
+        cancellationNoticeMinutes: 1440,
+        bufferMinutes: 0,
+        requiredPatientFieldsJson: JSON.stringify(["fullName"])
+      }
+    });
+
+    await expect(new PrismaOperationalRepository(prisma).getClinicProfile("clinic_minimal_only")).resolves.toBeUndefined();
+  });
+
+  it("removes stale services and professionals without dependencies when a profile is replaced", async () => {
+    await repos.upsertClinicProfile(profileWithServices("clinic_prune", ["svc_keep", "svc_stale"], ["pro_keep", "pro_stale"]));
+    await repos.upsertClinicProfile(profileWithServices("clinic_prune", ["svc_keep"], ["pro_keep"]));
+
+    await expect(new PrismaOperationalRepository(prisma).getClinicProfile("clinic_prune")).resolves.toEqual(
+      expect.objectContaining({
+        services: [expect.objectContaining({ id: "svc_keep", professionalIds: ["pro_keep"] })],
+        professionals: [expect.objectContaining({ id: "pro_keep" })]
+      })
+    );
+    await expect(
+      prisma.service.findMany({
+        where: { clinicId: "clinic_prune" },
+        orderBy: { id: "asc" },
+        select: { id: true }
+      })
+    ).resolves.toEqual([{ id: "svc_keep" }]);
+    await expect(
+      prisma.professional.findMany({
+        where: { clinicId: "clinic_prune" },
+        orderBy: { id: "asc" },
+        select: { id: true }
+      })
+    ).resolves.toEqual([{ id: "pro_keep" }]);
+  });
+
   it("persists same service and professional ids independently per clinic", async () => {
     await repos.upsertClinicProfile(
       operationalProfile({
@@ -737,6 +779,31 @@ function operationalProfile(input: {
       id: professional.id,
       name: professional.name ?? "Dra. Demo",
       calendarId: professional.calendarId,
+      workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
+    })),
+    appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 1440, bufferMinutes: 0 },
+    requiredPatientFields: ["fullName"]
+  });
+}
+
+function profileWithServices(clinicId: string, serviceIds: string[], professionalIds: string[]) {
+  return parseClinicProfile({
+    clinicId,
+    name: "Clinica Demo",
+    timezone: "America/Argentina/Buenos_Aires",
+    services: serviceIds.map((serviceId) => ({
+      id: serviceId,
+      name: serviceId === "svc_keep" ? "Botox" : "Peeling",
+      durationMinutes: 30,
+      priceText: "Desde $120.000",
+      preparation: "Evitar alcohol 24 horas antes.",
+      restrictions: ["Momentum no brinda diagnostico medico por WhatsApp."],
+      professionalIds
+    })),
+    professionals: professionalIds.map((professionalId) => ({
+      id: professionalId,
+      name: professionalId === "pro_keep" ? "Dra. Perez" : "Dra. Gomez",
+      calendarId: `${professionalId}_calendar`,
       workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
     })),
     appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 1440, bufferMinutes: 0 },

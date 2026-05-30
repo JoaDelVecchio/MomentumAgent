@@ -55,7 +55,14 @@ describe("clinic profile", () => {
             professionalIds: ["pro_missing"]
           }
         ],
-        professionals: [],
+        professionals: [
+          {
+            id: "pro_perez",
+            name: "Dra. Perez",
+            calendarId: "cal_perez",
+            workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
+          }
+        ],
         appointmentRules: {
           minimumNoticeMinutes: 120,
           cancellationNoticeMinutes: 1440,
@@ -64,6 +71,59 @@ describe("clinic profile", () => {
         requiredPatientFields: ["fullName"]
       })
     ).toThrow("Service svc_botox references missing professional pro_missing");
+  });
+
+  it("rejects profiles without at least one reservable service", () => {
+    expect(() =>
+      parseClinicProfile({
+        clinicId: "clinic_1",
+        name: "Clinica Demo",
+        timezone: "America/Argentina/Buenos_Aires",
+        services: [],
+        professionals: [
+          {
+            id: "pro_perez",
+            name: "Dra. Perez",
+            calendarId: "cal_perez",
+            workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
+          }
+        ],
+        appointmentRules: {
+          minimumNoticeMinutes: 120,
+          cancellationNoticeMinutes: 1440,
+          bufferMinutes: 0
+        },
+        requiredPatientFields: ["fullName"]
+      })
+    ).toThrow();
+  });
+
+  it("rejects profiles without at least one professional calendar mapping", () => {
+    expect(() =>
+      parseClinicProfile({
+        clinicId: "clinic_1",
+        name: "Clinica Demo",
+        timezone: "America/Argentina/Buenos_Aires",
+        services: [
+          {
+            id: "svc_botox",
+            name: "Botox",
+            durationMinutes: 30,
+            priceText: "Desde $120.000",
+            preparation: "Sin preparacion especial.",
+            restrictions: [],
+            professionalIds: []
+          }
+        ],
+        professionals: [],
+        appointmentRules: {
+          minimumNoticeMinutes: 120,
+          cancellationNoticeMinutes: 1440,
+          bufferMinutes: 0
+        },
+        requiredPatientFields: ["fullName"]
+      })
+    ).toThrow();
   });
 
   it("rejects non-IANA or invalid timezones before scheduling uses them", () => {

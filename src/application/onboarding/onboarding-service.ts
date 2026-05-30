@@ -74,6 +74,7 @@ export class OnboardingService {
   async createManualClinic(input: CreateManualClinicInput): Promise<ClinicSetupRecord> {
     return this.options.onboarding.upsertClinicSetup({
       clinicId: input.clinicId,
+      clinicName: input.clinicName,
       source: input.source,
       lifecycleState: "setup",
       paymentStatus: "unpaid",
@@ -98,6 +99,7 @@ export class OnboardingService {
     const updatedAt = this.currentDate(input.now);
     const setup = await this.options.onboarding.upsertClinicSetup({
       clinicId: input.clinicId,
+      clinicName: lead.clinicName,
       leadId: lead.id,
       source: lead.source,
       lifecycleState: "setup",
@@ -165,7 +167,7 @@ export class OnboardingService {
     const paymentOk =
       setup?.paymentStatus === "paid" || setup?.paymentStatus === "trial" || setup?.paymentStatus === "waived";
     const missing = [
-      !profile ? "clinic_profile" : undefined,
+      !isCompleteOperationalProfile(profile) ? "clinic_profile" : undefined,
       !paymentOk ? "payment" : undefined,
       !setup?.whatsappReady ? "whatsapp" : undefined,
       !setup?.calendarConnected ? "calendar" : undefined,
@@ -206,7 +208,7 @@ export class OnboardingService {
       this.options.onboarding.isClinicActive(clinicId),
       this.options.operational.getClinicProfile(clinicId)
     ]);
-    return active && Boolean(profile);
+    return active && isCompleteOperationalProfile(profile);
   }
 
   private async requireSetup(clinicId: Id): Promise<ClinicSetupRecord> {
@@ -220,4 +222,22 @@ export class OnboardingService {
   private currentDate(override?: Date): Date {
     return new Date(override ?? this.options.now?.() ?? new Date());
   }
+}
+
+function isCompleteOperationalProfile(profile: ClinicProfile | undefined): boolean {
+  if (!profile) {
+    return false;
+  }
+
+  const reservableProfessionalIds = new Set(
+    profile.professionals
+      .filter((professional) => professional.calendarId.trim().length > 0)
+      .map((professional) => professional.id)
+  );
+  return (
+    reservableProfessionalIds.size > 0 &&
+    profile.services.some((service) =>
+      service.professionalIds.some((professionalId) => reservableProfessionalIds.has(professionalId))
+    )
+  );
 }

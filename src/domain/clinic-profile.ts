@@ -34,25 +34,29 @@ const clinicProfileSchema = z.object({
   clinicId: z.string().min(1),
   name: z.string().min(1),
   timezone: z.string().min(1).refine(isValidTimezone, "Invalid IANA timezone"),
-  services: z.array(
-    z.object({
-      id: z.string().min(1),
-      name: z.string().min(1),
-      durationMinutes: z.number().int().positive(),
-      priceText: z.string().min(1),
-      preparation: z.string(),
-      restrictions: z.array(z.string()),
-      professionalIds: z.array(z.string().min(1)).min(1)
-    })
-  ),
-  professionals: z.array(
-    z.object({
-      id: z.string().min(1),
-      name: z.string().min(1),
-      calendarId: z.string().min(1),
-      workingHours: z.array(workingWindowSchema).default([])
-    })
-  ),
+  services: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        name: z.string().min(1),
+        durationMinutes: z.number().int().positive(),
+        priceText: z.string().min(1),
+        preparation: z.string(),
+        restrictions: z.array(z.string()),
+        professionalIds: z.array(z.string().min(1)).min(1)
+      })
+    )
+    .min(1),
+  professionals: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        name: z.string().min(1),
+        calendarId: z.string().min(1),
+        workingHours: z.array(workingWindowSchema).default([])
+      })
+    )
+    .min(1),
   appointmentRules: z.object({
     minimumNoticeMinutes: z.number().int().nonnegative(),
     cancellationNoticeMinutes: z.number().int().nonnegative(),

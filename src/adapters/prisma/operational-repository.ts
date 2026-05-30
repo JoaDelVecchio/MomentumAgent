@@ -198,6 +198,7 @@ export class PrismaOperationalRepository implements OperationalRepository {
       }
 
       await syncServiceProfessionalLinks(tx, profile);
+      await pruneStaleProfileRows(tx, profile);
     });
 
     this.clinicProfiles.set(profile.clinicId, cloneClinicProfile(profile));
@@ -222,6 +223,9 @@ export class PrismaOperationalRepository implements OperationalRepository {
     }
 
     const hydrated = toClinicProfile(persisted);
+    if (!hydrated) {
+      return undefined;
+    }
     this.clinicProfiles.set(clinicId, cloneClinicProfile(hydrated));
     return cloneClinicProfile(hydrated);
   }
@@ -722,6 +726,28 @@ async function syncServiceProfessionalLinks(tx: Prisma.TransactionClient, profil
   }
 }
 
+async function pruneStaleProfileRows(tx: Prisma.TransactionClient, profile: ClinicProfile): Promise<void> {
+  await tx.service.deleteMany({
+    where: {
+      clinicId: profile.clinicId,
+      id: { notIn: profile.services.map((service) => service.id) },
+      serviceProfessionals: { none: {} },
+      appointments: { none: {} },
+      patientInterests: { none: {} }
+    }
+  });
+
+  await tx.professional.deleteMany({
+    where: {
+      clinicId: profile.clinicId,
+      id: { notIn: profile.professionals.map((professional) => professional.id) },
+      serviceProfessionals: { none: {} },
+      appointments: { none: {} },
+      patientInterests: { none: {} }
+    }
+  });
+}
+
 function serializePendingBooking(pendingBooking: PendingBooking | undefined): string | null {
   if (!pendingBooking) return null;
   return JSON.stringify({
@@ -784,7 +810,7 @@ function toPatient(record: PatientRecord): Patient {
   };
 }
 
-function toClinicProfile(record: ClinicProfileRecord): ClinicProfile {
+function toClinicProfile(record: ClinicProfileRecord): ClinicProfile | undefined {
   const serviceProfessionalIds = new Map<string, string[]>();
   const linkedProfessionalIds = new Set<string>();
   for (const link of record.serviceProfessionals) {
@@ -794,29 +820,35 @@ function toClinicProfile(record: ClinicProfileRecord): ClinicProfile {
     serviceProfessionalIds.set(link.serviceId, professionalIds);
   }
 
+  const services = record.services
+    .map((service) => ({
+      id: service.id,
+      name: service.name,
+      durationMinutes: service.durationMinutes,
+      priceText: service.priceText,
+      preparation: service.preparation,
+      restrictions: parseStringArray(service.restrictionsJson),
+      professionalIds: serviceProfessionalIds.get(service.id) ?? []
+    }))
+    .filter((service) => service.professionalIds.length > 0);
+  const professionals = record.professionals
+    .filter((professional) => linkedProfessionalIds.has(professional.id))
+    .map((professional) => ({
+      id: professional.id,
+      name: professional.name,
+      calendarId: professional.calendarId,
+      workingHours: parseWorkingHours(professional.workingHoursJson)
+    }));
+  if (services.length === 0 || professionals.length === 0) {
+    return undefined;
+  }
+
   return parseClinicProfile({
     clinicId: record.id,
     name: record.name,
     timezone: record.timezone,
-    services: record.services
-      .map((service) => ({
-        id: service.id,
-        name: service.name,
-        durationMinutes: service.durationMinutes,
-        priceText: service.priceText,
-        preparation: service.preparation,
-        restrictions: parseStringArray(service.restrictionsJson),
-        professionalIds: serviceProfessionalIds.get(service.id) ?? []
-      }))
-      .filter((service) => service.professionalIds.length > 0),
-    professionals: record.professionals
-      .filter((professional) => linkedProfessionalIds.has(professional.id))
-      .map((professional) => ({
-        id: professional.id,
-        name: professional.name,
-        calendarId: professional.calendarId,
-        workingHours: parseWorkingHours(professional.workingHoursJson)
-      })),
+    services,
+    professionals,
     appointmentRules: {
       minimumNoticeMinutes: record.minimumNoticeMinutes,
       cancellationNoticeMinutes: record.cancellationNoticeMinutes,

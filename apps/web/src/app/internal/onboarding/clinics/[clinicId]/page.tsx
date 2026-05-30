@@ -274,7 +274,7 @@ export default function ClinicSetupPage() {
 
         <div className="internal-panel internal-form">
           <div className="internal-panel-heading">
-            <h2>Knowledge / FAQ placeholder</h2>
+            <h2>Knowledge / FAQ deferred</h2>
           </div>
           <label>
             Local notes
@@ -285,7 +285,7 @@ export default function ClinicSetupPage() {
             />
           </label>
           <p className="internal-empty">
-            Knowledge persistence is not available in the backend yet. These notes are local only and are not saved.
+            Deferred for this branch: these notes are local only, are not saved, and are not used by the agent.
           </p>
         </div>
       </section>

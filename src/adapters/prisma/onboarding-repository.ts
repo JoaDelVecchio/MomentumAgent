@@ -116,12 +116,12 @@ export class PrismaOnboardingRepository implements OnboardingRepository {
     await this.prisma.$transaction(async (tx) => {
       const lead = await tx.clinicLead.findUnique({
         where: { id: input.leadId },
-        select: { id: true }
+        select: { id: true, clinicName: true }
       });
       if (!lead) {
         throw new Error(`Clinic lead ${input.leadId} not found`);
       }
-      await ensureMinimalClinic(tx, input.clinicId);
+      await ensureMinimalClinic(tx, input.clinicId, lead.clinicName);
       await tx.clinicLead.update({
         where: { id: input.leadId },
         data: {
@@ -134,6 +134,7 @@ export class PrismaOnboardingRepository implements OnboardingRepository {
         where: { id: input.clinicId },
         data: {
           leadId: input.leadId,
+          name: lead.clinicName,
           updatedAt: input.updatedAt
         }
       });
@@ -145,7 +146,7 @@ export class PrismaOnboardingRepository implements OnboardingRepository {
       where: { id: input.clinicId },
       create: {
         id: input.clinicId,
-        name: input.clinicId,
+        name: input.clinicName ?? input.clinicId,
         ...MINIMAL_CLINIC_DEFAULTS,
         leadId: input.leadId ?? null,
         source: input.source,
@@ -163,6 +164,7 @@ export class PrismaOnboardingRepository implements OnboardingRepository {
       },
       update: {
         ...(input.leadId === undefined ? {} : { leadId: input.leadId }),
+        ...(input.clinicName === undefined ? {} : { name: input.clinicName }),
         source: input.source,
         lifecycleState: input.lifecycleState,
         paymentStatus: input.paymentStatus,
@@ -339,13 +341,14 @@ function toKnowledgeRecord(row: ClinicKnowledgeRow): ClinicKnowledgeRecord {
 
 async function ensureMinimalClinic(
   prisma: Pick<PrismaClient, "clinic">,
-  clinicId: Id
+  clinicId: Id,
+  clinicName?: string
 ): Promise<void> {
   await prisma.clinic.upsert({
     where: { id: clinicId },
     create: {
       id: clinicId,
-      name: clinicId,
+      name: clinicName ?? clinicId,
       ...MINIMAL_CLINIC_DEFAULTS
     },
     update: {}
