@@ -1,6 +1,6 @@
 import type { ClinicLeadPayload, ClinicLeadResponse } from "./types";
 
-export const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:3000";
+export const apiBaseUrl = "/api/backend";
 
 export async function submitClinicLead(payload: ClinicLeadPayload): Promise<ClinicLeadResponse> {
   const response = await fetch(`${apiBaseUrl}/leads`, {
