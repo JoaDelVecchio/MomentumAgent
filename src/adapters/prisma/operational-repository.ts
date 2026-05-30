@@ -4,8 +4,13 @@ import type { PrismaClient } from "@prisma/client";
 import type { Appointment, ClinicProfile, Id, Patient } from "../../domain/types.js";
 import type {
   Conversation,
+  ConversationByPatientLookup,
   ConversationLookup,
+  ListScheduledAppointmentsInput,
   OperationalRepository,
+  OutboundDeliveryClaim,
+  OutboundDeliveryClaimInput,
+  OutboundDeliveryRecord,
   PatientInterest,
   PendingBooking,
   ProcessedWebhookDeliveryInput,
@@ -251,6 +256,34 @@ export class PrismaOperationalRepository implements OperationalRepository {
     return appointments.map(toAppointment);
   }
 
+  async listScheduledAppointments(input: ListScheduledAppointmentsInput): Promise<Appointment[]> {
+    const appointments = await this.prisma.appointment.findMany({
+      where: {
+        clinicId: input.clinicId,
+        status: "scheduled",
+        startsAt: { gte: input.from, lte: input.to }
+      },
+      orderBy: { startsAt: "asc" }
+    });
+    return appointments.map(toAppointment);
+  }
+
+  async listConversationsByClinic(clinicId: Id): Promise<Conversation[]> {
+    const conversations = await this.prisma.conversation.findMany({
+      where: { clinicId },
+      orderBy: { updatedAt: "asc" }
+    });
+    return conversations.map(toConversation);
+  }
+
+  async listConversationsByPatient(lookup: ConversationByPatientLookup): Promise<Conversation[]> {
+    const conversations = await this.prisma.conversation.findMany({
+      where: { clinicId: lookup.clinicId, patientId: lookup.patientId },
+      orderBy: { updatedAt: "desc" }
+    });
+    return conversations.map(toConversation);
+  }
+
   async saveInterest(interest: PatientInterest): Promise<void> {
     await this.prisma.patientInterest.upsert({
       where: { id: interest.id },
@@ -459,6 +492,30 @@ export class PrismaOperationalRepository implements OperationalRepository {
       if (isPrismaUniqueConflict(error)) return;
       throw error;
     }
+  }
+
+  async claimOutboundDelivery(_input: OutboundDeliveryClaimInput): Promise<OutboundDeliveryClaim> {
+    throw new Error("Outbound deliveries are not implemented for PrismaOperationalRepository");
+  }
+
+  async getOutboundDelivery(_key: string): Promise<OutboundDeliveryRecord | undefined> {
+    throw new Error("Outbound deliveries are not implemented for PrismaOperationalRepository");
+  }
+
+  async markOutboundDeliverySent(_input: {
+    key: string;
+    providerMessageId: string;
+    sentAt: Date;
+  }): Promise<void> {
+    throw new Error("Outbound deliveries are not implemented for PrismaOperationalRepository");
+  }
+
+  async markOutboundDeliveryBlocked(_input: { key: string; reason: string; blockedAt: Date }): Promise<void> {
+    throw new Error("Outbound deliveries are not implemented for PrismaOperationalRepository");
+  }
+
+  async markOutboundDeliveryFailed(_input: { key: string; reason: string; failedAt: Date }): Promise<void> {
+    throw new Error("Outbound deliveries are not implemented for PrismaOperationalRepository");
   }
 }
 

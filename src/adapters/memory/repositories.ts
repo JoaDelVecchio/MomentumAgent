@@ -1,8 +1,13 @@
 import type { Appointment, ClinicProfile, Id, Patient } from "../../domain/types.js";
 import type {
   Conversation,
+  ConversationByPatientLookup,
   ConversationLookup,
+  ListScheduledAppointmentsInput,
   OperationalRepository,
+  OutboundDeliveryClaim,
+  OutboundDeliveryClaimInput,
+  OutboundDeliveryRecord,
   PatientInterest,
   PendingBooking,
   ProcessedWebhookDeliveryInput,
@@ -21,7 +26,9 @@ export class InMemoryRepositories implements OperationalRepository {
   private interests = new Map<Id, PatientInterest>();
   private optOutWhatsappNumbers = new Set<string>();
   private webhookDeliveries = new Map<string, WebhookDeliveryRecord>();
+  private outboundDeliveries = new Map<string, OutboundDeliveryRecord>();
   private appointmentCounter = 0;
+  private outboundDeliveryCounter = 0;
   private appointmentLocks = new Map<Id, Promise<unknown>>();
   private conversationLocks = new Map<Id, Promise<unknown>>();
   private webhookDeliveryLocks = new Map<string, Promise<unknown>>();
@@ -83,6 +90,33 @@ export class InMemoryRepositories implements OperationalRepository {
     return [...this.appointments.values()]
       .filter((appointment) => appointment.patientId === patientId)
       .map((appointment) => cloneAppointment(appointment));
+  }
+
+  listScheduledAppointments(input: ListScheduledAppointmentsInput) {
+    return [...this.appointments.values()]
+      .filter(
+        (appointment) =>
+          appointment.clinicId === input.clinicId &&
+          appointment.status === "scheduled" &&
+          appointment.startsAt.getTime() >= input.from.getTime() &&
+          appointment.startsAt.getTime() <= input.to.getTime()
+      )
+      .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
+      .map((appointment) => cloneAppointment(appointment));
+  }
+
+  listConversationsByClinic(clinicId: Id) {
+    return [...this.conversations.values()]
+      .filter((conversation) => conversation.clinicId === clinicId)
+      .sort((a, b) => a.updatedAt.getTime() - b.updatedAt.getTime())
+      .map((conversation) => cloneConversation(conversation));
+  }
+
+  listConversationsByPatient(lookup: ConversationByPatientLookup) {
+    return [...this.conversations.values()]
+      .filter((conversation) => conversation.clinicId === lookup.clinicId && conversation.patientId === lookup.patientId)
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+      .map((conversation) => cloneConversation(conversation));
   }
 
   saveInterest(interest: PatientInterest) {
@@ -166,6 +200,80 @@ export class InMemoryRepositories implements OperationalRepository {
       ...delivery,
       status: "processed"
     });
+  }
+
+  claimOutboundDelivery(input: OutboundDeliveryClaimInput): OutboundDeliveryClaim {
+    const existing = this.getOutboundDelivery(input.key);
+    if (existing) {
+      return { kind: "existing", delivery: existing };
+    }
+
+    this.outboundDeliveryCounter += 1;
+    const now = new Date(input.now);
+    const delivery: OutboundDeliveryRecord = {
+      key: input.key,
+      clinicId: input.clinicId,
+      automationType: input.automationType,
+      toWhatsappNumber: input.toWhatsappNumber,
+      patientId: input.patientId,
+      conversationId: input.conversationId,
+      appointmentId: input.appointmentId,
+      templateName: input.templateName,
+      metadata: { ...input.metadata },
+      id: `outbound_${this.outboundDeliveryCounter}`,
+      status: "claimed",
+      claimedAt: now,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.outboundDeliveries.set(input.key, cloneOutboundDelivery(delivery));
+    return { kind: "new", delivery: cloneOutboundDelivery(delivery) };
+  }
+
+  getOutboundDelivery(key: string) {
+    const delivery = this.outboundDeliveries.get(key);
+    return delivery ? cloneOutboundDelivery(delivery) : undefined;
+  }
+
+  markOutboundDeliverySent(input: { key: string; providerMessageId: string; sentAt: Date }) {
+    const delivery = this.requireOutboundDelivery(input.key);
+    this.outboundDeliveries.set(input.key, {
+      ...delivery,
+      status: "sent",
+      providerMessageId: input.providerMessageId,
+      sentAt: new Date(input.sentAt),
+      updatedAt: new Date(input.sentAt)
+    });
+  }
+
+  markOutboundDeliveryBlocked(input: { key: string; reason: string; blockedAt: Date }) {
+    const delivery = this.requireOutboundDelivery(input.key);
+    this.outboundDeliveries.set(input.key, {
+      ...delivery,
+      status: "blocked",
+      failureReason: input.reason,
+      blockedAt: new Date(input.blockedAt),
+      updatedAt: new Date(input.blockedAt)
+    });
+  }
+
+  markOutboundDeliveryFailed(input: { key: string; reason: string; failedAt: Date }) {
+    const delivery = this.requireOutboundDelivery(input.key);
+    this.outboundDeliveries.set(input.key, {
+      ...delivery,
+      status: "failed",
+      failureReason: input.reason,
+      failedAt: new Date(input.failedAt),
+      updatedAt: new Date(input.failedAt)
+    });
+  }
+
+  private requireOutboundDelivery(key: string) {
+    const delivery = this.outboundDeliveries.get(key);
+    if (!delivery) {
+      throw new Error(`Outbound delivery ${key} not found`);
+    }
+    return cloneOutboundDelivery(delivery);
   }
 }
 
@@ -262,4 +370,17 @@ function clonePatientInterest(interest: PatientInterest): PatientInterest {
 
 function cloneWebhookDelivery(delivery: WebhookDeliveryRecord): WebhookDeliveryRecord {
   return { ...delivery };
+}
+
+function cloneOutboundDelivery(delivery: OutboundDeliveryRecord): OutboundDeliveryRecord {
+  return {
+    ...delivery,
+    metadata: { ...delivery.metadata },
+    claimedAt: new Date(delivery.claimedAt),
+    sentAt: delivery.sentAt ? new Date(delivery.sentAt) : undefined,
+    blockedAt: delivery.blockedAt ? new Date(delivery.blockedAt) : undefined,
+    failedAt: delivery.failedAt ? new Date(delivery.failedAt) : undefined,
+    createdAt: new Date(delivery.createdAt),
+    updatedAt: new Date(delivery.updatedAt)
+  };
 }

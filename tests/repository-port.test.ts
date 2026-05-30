@@ -6,8 +6,11 @@ import { ConversationWorkflow } from "../src/application/conversations/conversat
 import { SchedulingService } from "../src/application/scheduling/scheduling-service.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
 import type {
+  ConversationByPatientLookup,
   ConversationLookup,
+  ListScheduledAppointmentsInput,
   OperationalRepository,
+  OutboundDeliveryClaimInput,
   ProcessedWebhookDeliveryInput,
   WebhookDeliveryOutcomeInput
 } from "../src/ports/repositories.js";
@@ -121,6 +124,18 @@ class AsyncRepositoryAdapter implements OperationalRepository {
     return this.inner.listAppointmentsByPatient(input);
   }
 
+  async listScheduledAppointments(input: ListScheduledAppointmentsInput) {
+    return this.inner.listScheduledAppointments(input);
+  }
+
+  async listConversationsByClinic(input: string) {
+    return this.inner.listConversationsByClinic(input);
+  }
+
+  async listConversationsByPatient(input: ConversationByPatientLookup) {
+    return this.inner.listConversationsByPatient(input);
+  }
+
   async saveInterest(input: Parameters<InMemoryRepositories["saveInterest"]>[0]) {
     return this.inner.saveInterest(input);
   }
@@ -163,5 +178,25 @@ class AsyncRepositoryAdapter implements OperationalRepository {
 
   async markProcessedWebhookDelivery(input: string | ProcessedWebhookDeliveryInput) {
     return this.inner.markProcessedWebhookDelivery(input);
+  }
+
+  async claimOutboundDelivery(input: OutboundDeliveryClaimInput) {
+    return this.inner.claimOutboundDelivery(input);
+  }
+
+  async getOutboundDelivery(input: string) {
+    return this.inner.getOutboundDelivery(input);
+  }
+
+  async markOutboundDeliverySent(input: Parameters<InMemoryRepositories["markOutboundDeliverySent"]>[0]) {
+    return this.inner.markOutboundDeliverySent(input);
+  }
+
+  async markOutboundDeliveryBlocked(input: Parameters<InMemoryRepositories["markOutboundDeliveryBlocked"]>[0]) {
+    return this.inner.markOutboundDeliveryBlocked(input);
+  }
+
+  async markOutboundDeliveryFailed(input: Parameters<InMemoryRepositories["markOutboundDeliveryFailed"]>[0]) {
+    return this.inner.markOutboundDeliveryFailed(input);
   }
 }

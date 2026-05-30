@@ -63,6 +63,51 @@ export type WebhookDeliveryOutcomeInput = ProcessedWebhookDeliveryInput & {
   workflowResult: "reply" | "handoff";
 };
 
+export type OutboundAutomationType = "reminder" | "reactivation" | "freed_slot";
+
+export type OutboundDeliveryStatus = "claimed" | "sent" | "failed" | "blocked";
+
+export type OutboundDeliveryClaimInput = {
+  key: string;
+  clinicId: Id;
+  automationType: OutboundAutomationType;
+  toWhatsappNumber: string;
+  patientId?: Id;
+  conversationId?: Id;
+  appointmentId?: Id;
+  templateName: string;
+  metadata: Record<string, string>;
+  now: Date;
+};
+
+export type OutboundDeliveryRecord = Omit<OutboundDeliveryClaimInput, "now"> & {
+  id: Id;
+  status: OutboundDeliveryStatus;
+  providerMessageId?: string;
+  failureReason?: string;
+  claimedAt: Date;
+  sentAt?: Date;
+  blockedAt?: Date;
+  failedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type OutboundDeliveryClaim =
+  | { kind: "new"; delivery: OutboundDeliveryRecord }
+  | { kind: "existing"; delivery: OutboundDeliveryRecord };
+
+export type ListScheduledAppointmentsInput = {
+  clinicId: Id;
+  from: Date;
+  to: Date;
+};
+
+export type ConversationByPatientLookup = {
+  clinicId: Id;
+  patientId: Id;
+};
+
 export interface OperationalRepository {
   upsertClinicProfile(profile: ClinicProfile): MaybePromise<void>;
   getClinicProfile(clinicId: Id): MaybePromise<ClinicProfile | undefined>;
@@ -77,6 +122,9 @@ export interface OperationalRepository {
   withWebhookDeliveryLock<T>(idempotencyKey: string, operation: () => Promise<T>): Promise<T>;
   getAppointment(appointmentId: Id): MaybePromise<Appointment | undefined>;
   listAppointmentsByPatient(patientId: Id): MaybePromise<Appointment[]>;
+  listScheduledAppointments(input: ListScheduledAppointmentsInput): MaybePromise<Appointment[]>;
+  listConversationsByClinic(clinicId: Id): MaybePromise<Conversation[]>;
+  listConversationsByPatient(lookup: ConversationByPatientLookup): MaybePromise<Conversation[]>;
   saveInterest(interest: PatientInterest): MaybePromise<void>;
   listActiveInterests(): MaybePromise<PatientInterest[]>;
   markOptOut(whatsappNumber: string): MaybePromise<void>;
@@ -88,4 +136,21 @@ export interface OperationalRepository {
   markWebhookDeliveryReadyForRetry(input: ProcessedWebhookDeliveryInput): MaybePromise<void>;
   hasProcessedWebhookDelivery(idempotencyKey: string): MaybePromise<boolean>;
   markProcessedWebhookDelivery(input: string | ProcessedWebhookDeliveryInput): MaybePromise<void>;
+  claimOutboundDelivery(input: OutboundDeliveryClaimInput): MaybePromise<OutboundDeliveryClaim>;
+  getOutboundDelivery(key: string): MaybePromise<OutboundDeliveryRecord | undefined>;
+  markOutboundDeliverySent(input: {
+    key: string;
+    providerMessageId: string;
+    sentAt: Date;
+  }): MaybePromise<void>;
+  markOutboundDeliveryBlocked(input: {
+    key: string;
+    reason: string;
+    blockedAt: Date;
+  }): MaybePromise<void>;
+  markOutboundDeliveryFailed(input: {
+    key: string;
+    reason: string;
+    failedAt: Date;
+  }): MaybePromise<void>;
 }
