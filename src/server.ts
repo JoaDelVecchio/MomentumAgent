@@ -3,26 +3,35 @@ import { PrismaClient } from "@prisma/client";
 import { GoogleCalendarAdapter } from "./adapters/google/google-calendar-adapter.js";
 import { GoogleCalendarApiClient } from "./adapters/google/google-calendar-client.js";
 import { GoogleOAuthService } from "./adapters/google/google-oauth.js";
+import { PrismaAuditLog } from "./adapters/prisma/audit-log.js";
 import { KapsoWhatsAppProvider } from "./adapters/whatsapp/kapso/kapso-whatsapp-provider.js";
 import {
   Aes256GcmTokenCipher,
   PrismaCalendarCredentialRepository
 } from "./adapters/prisma/calendar-auth-repository.js";
+import { PrismaOperationalRepository } from "./adapters/prisma/operational-repository.js";
+import { ConversationWorkflow } from "./application/conversations/conversation-workflow.js";
 import { WhatsAppInboundService } from "./application/messaging/whatsapp-inbound-service.js";
+import { SchedulingService } from "./application/scheduling/scheduling-service.js";
 import { buildApp } from "./api/app.js";
 import { readGoogleCalendarConfig } from "./config/google-calendar.js";
 import { readWhatsAppConfig, type WhatsAppConfig } from "./config/whatsapp.js";
-import { buildDevContainer, type CalendarProvider } from "./dev/seed.js";
+import { buildDemoClinicProfile } from "./dev/demo-clinic-profile.js";
+import { buildDefaultCalendar, type CalendarProvider } from "./dev/seed.js";
 import type { CalendarPort } from "./ports/calendar.js";
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? "127.0.0.1";
 const calendarProvider = readCalendarProvider(process.env.CALENDAR_PROVIDER);
-const googleRuntime = calendarProvider === "google" ? buildGoogleCalendarRuntime() : undefined;
 const whatsappConfig = readWhatsAppConfig(process.env);
+const sharedPrisma =
+  calendarProvider === "google" || whatsappConfig.provider === "kapso" ? new PrismaClient() : undefined;
+const googleRuntime =
+  calendarProvider === "google" ? buildGoogleCalendarRuntime(requirePrisma(sharedPrisma)) : undefined;
 const whatsappRuntime =
   whatsappConfig.provider === "kapso"
-    ? buildWhatsAppRuntime({
+    ? await buildWhatsAppRuntime({
+        prisma: requirePrisma(sharedPrisma),
         config: whatsappConfig,
         calendarProvider,
         calendar: googleRuntime?.calendar
@@ -50,12 +59,11 @@ process.once("SIGTERM", () => {
 
 async function shutdown() {
   await app.close();
-  await googleRuntime?.prisma.$disconnect();
+  await sharedPrisma?.$disconnect();
   process.exit(0);
 }
 
-function buildGoogleCalendarRuntime() {
-  const prisma = new PrismaClient();
+function buildGoogleCalendarRuntime(prisma: PrismaClient) {
   const config = readGoogleCalendarConfig(process.env);
   const credentials = new PrismaCalendarCredentialRepository(
     prisma,
@@ -70,23 +78,28 @@ function buildGoogleCalendarRuntime() {
   });
 
   return {
-    prisma,
     setupToken: config.setupToken,
     oauthService: new GoogleOAuthService(config, credentials),
     calendar: new GoogleCalendarAdapter(client, { timezone })
   };
 }
 
-function buildWhatsAppRuntime(input: {
+async function buildWhatsAppRuntime(input: {
+  prisma: PrismaClient;
   config: Extract<WhatsAppConfig, { provider: "kapso" }>;
   calendarProvider: CalendarProvider;
   calendar?: CalendarPort;
 }) {
   const clinicId = process.env.SIMULATION_CLINIC_ID ?? "clinic_1";
-  const container = buildDevContainer({
-    calendarProvider: input.calendarProvider,
-    calendar: input.calendar
-  });
+  const repos = new PrismaOperationalRepository(input.prisma);
+  await repos.upsertClinicProfile(buildDemoClinicProfile());
+  const audit = new PrismaAuditLog(input.prisma);
+  const scheduling = new SchedulingService(
+    repos,
+    input.calendar ?? buildDefaultCalendar(input.calendarProvider),
+    audit
+  );
+  const workflow = new ConversationWorkflow(repos, scheduling, audit);
   const provider = new KapsoWhatsAppProvider({
     apiKey: input.config.apiKey,
     phoneNumberId: input.config.phoneNumberId
@@ -97,13 +110,20 @@ function buildWhatsAppRuntime(input: {
       secret: input.config.webhookSecret,
       phoneNumberClinicMap: { [input.config.phoneNumberId]: clinicId },
       inboundService: new WhatsAppInboundService({
-        repos: container.repos,
+        repos,
         provider,
-        workflow: container.workflow,
-        audit: container.audit
+        workflow,
+        audit
       })
     }
   };
+}
+
+function requirePrisma(prisma: PrismaClient | undefined): PrismaClient {
+  if (!prisma) {
+    throw new Error("Prisma runtime was not initialized");
+  }
+  return prisma;
 }
 
 function readCalendarProvider(provider: string | undefined): CalendarProvider {
