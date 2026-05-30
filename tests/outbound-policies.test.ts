@@ -26,6 +26,17 @@ describe("outbound policies", () => {
     expect(shouldSendReminder({ now: new Date("2026-06-10T12:00:00.000Z"), appointmentTime })).toBe("none");
   });
 
+  it("uses reminder due windows without sending before the nominal due time", () => {
+    const appointmentTime = new Date("2026-06-10T15:00:00.000Z");
+
+    expect(shouldSendReminder({ now: new Date("2026-06-07T14:45:00.000Z"), appointmentTime })).toBe("none");
+    expect(shouldSendReminder({ now: new Date("2026-06-07T14:30:00.000Z"), appointmentTime })).toBe("none");
+    expect(shouldSendReminder({ now: new Date("2026-06-09T14:45:00.000Z"), appointmentTime })).toBe("none");
+    expect(shouldSendReminder({ now: new Date("2026-06-09T14:30:00.000Z"), appointmentTime })).toBe("none");
+    expect(shouldSendReminder({ now: new Date("2026-06-09T16:00:00.000Z"), appointmentTime })).toBe("24h");
+    expect(shouldSendReminder({ now: new Date("2026-06-10T04:01:00.000Z"), appointmentTime })).toBe("none");
+  });
+
   it("reactivates only prior contacts who did not opt out", () => {
     expect(canReactivate({ hadPriorConversation: true, optedOut: false, previousAttempts: 0 })).toBe(true);
     expect(canReactivate({ hadPriorConversation: false, optedOut: false, previousAttempts: 0 })).toBe(false);

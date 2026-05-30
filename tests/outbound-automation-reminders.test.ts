@@ -106,6 +106,63 @@ describe("OutboundAutomationService reminders", () => {
     expect(context.provider.sentTemplateMessages).toHaveLength(1);
   });
 
+  it("sends the 24h reminder at the next allowed hour after an 08:00 local due time is blocked", async () => {
+    const context = await buildReminderContext({
+      appointmentStartsAt: new Date("2026-06-03T11:00:00.000Z")
+    });
+
+    const quietHoursSummary = await context.service.runDueReminders({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T11:00:00.000Z")
+    });
+
+    expect(quietHoursSummary).toEqual({ sent: 0, blocked: 1, failed: 0, skipped: 0 });
+    expect(await context.repos.getOutboundDelivery("reminder:appt_1:24h")).toBeUndefined();
+
+    const allowedHoursSummary = await context.service.runDueReminders({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:00:00.000Z")
+    });
+
+    expect(allowedHoursSummary).toEqual({ sent: 1, blocked: 0, failed: 0, skipped: 0 });
+    expect(context.provider.sentTemplateMessages).toEqual([
+      expect.objectContaining({
+        templateName: "appointment_reminder_24h"
+      })
+    ]);
+  });
+
+  it("only sends same-day reminders for long-duration services", async () => {
+    const longDuration = await buildReminderContext({
+      appointmentStartsAt: new Date("2026-06-02T15:00:00.000Z"),
+      appointment: { endsAt: new Date("2026-06-02T16:00:00.000Z") },
+      serviceDurationMinutes: 60
+    });
+    const defaultDuration = await buildReminderContext({
+      appointmentStartsAt: new Date("2026-06-02T15:00:00.000Z")
+    });
+
+    expect(
+      await longDuration.service.runDueReminders({
+        clinicId: "clinic_1",
+        now: new Date("2026-06-02T12:00:00.000Z")
+      })
+    ).toEqual({ sent: 1, blocked: 0, failed: 0, skipped: 0 });
+    expect(longDuration.provider.sentTemplateMessages).toEqual([
+      expect.objectContaining({
+        templateName: "appointment_reminder_same_day"
+      })
+    ]);
+
+    expect(
+      await defaultDuration.service.runDueReminders({
+        clinicId: "clinic_1",
+        now: new Date("2026-06-02T12:00:00.000Z")
+      })
+    ).toEqual({ sent: 0, blocked: 0, failed: 0, skipped: 0 });
+    expect(defaultDuration.provider.sentTemplateMessages).toEqual([]);
+  });
+
   it("blocks reminder when calendar event is cancelled", async () => {
     const context = await buildReminderContext({
       appointmentStartsAt: new Date("2026-06-03T12:00:00.000Z")
@@ -196,6 +253,7 @@ async function buildReminderContext(input: {
   appointmentStartsAt: Date;
   conversation?: Partial<Conversation>;
   appointment?: Partial<Appointment>;
+  serviceDurationMinutes?: number;
 }) {
   const repos = new InMemoryRepositories();
   const calendar = new FakeCalendar();
@@ -204,7 +262,7 @@ async function buildReminderContext(input: {
   const templateService = new OutboundTemplateService({ repos, provider, audit });
   const service = new OutboundAutomationService({ repos, calendar, templateService, audit });
 
-  repos.upsertClinicProfile(clinicProfile());
+  repos.upsertClinicProfile(clinicProfile(input.serviceDurationMinutes));
   repos.upsertPatient({ id: "pat_1", whatsappNumber: "+5491111111111", fullName: "Ana Gomez" });
   repos.saveConversation({
     id: "conv_1",
@@ -235,7 +293,7 @@ async function buildReminderContext(input: {
   return { repos, calendar, provider, audit, templateService, service };
 }
 
-function clinicProfile(): ClinicProfile {
+function clinicProfile(serviceDurationMinutes = 30): ClinicProfile {
   return parseClinicProfile({
     clinicId: "clinic_1",
     name: "Clinica Demo",
@@ -244,7 +302,7 @@ function clinicProfile(): ClinicProfile {
       {
         id: "svc_botox",
         name: "Botox",
-        durationMinutes: 30,
+        durationMinutes: serviceDurationMinutes,
         priceText: "Desde $120.000",
         preparation: "Evitar alcohol 24 horas antes.",
         restrictions: [],

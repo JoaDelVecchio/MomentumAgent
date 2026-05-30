@@ -39,6 +39,8 @@ type TemporaryFreedSlotBlockReason = "quiet_hours" | "handoff_paused";
 type OutboundBlockReason = ReminderBlockReason | ReactivationBlockReason | FreedSlotBlockReason;
 type ReactivationTemplateKind = "reactivation_1" | "reactivation_2";
 
+const SAME_DAY_RISK_SERVICE_DURATION_MINUTES = 60;
+
 export class OutboundAutomationService {
   constructor(private readonly options: OutboundAutomationServiceOptions) {}
 
@@ -53,16 +55,17 @@ export class OutboundAutomationService {
 
     for (const appointment of appointments) {
       const alreadySent = await this.sentReminderKinds(appointment.id);
+      const sameDayRisk = isSameDayRiskAppointment({ appointment, profile });
       const kind = shouldSendReminder({
         now: input.now,
         appointmentTime: appointment.startsAt,
-        sameDayRisk: false,
+        sameDayRisk,
         alreadySent
       });
       const dueKind = shouldSendReminder({
         now: input.now,
         appointmentTime: appointment.startsAt,
-        sameDayRisk: false
+        sameDayRisk
       });
 
       if (kind === "none" && dueKind === "none") {
@@ -297,7 +300,7 @@ export class OutboundAutomationService {
     }
 
     const claim = await this.options.repos.claimOutboundDelivery({
-      key: reactivationDeliveryKey(input.conversation.id, input.attempt),
+      key: reactivationDeliveryKey(input.conversation.clinicId, input.conversation.id, input.attempt),
       clinicId: input.conversation.clinicId,
       automationType: "reactivation",
       toWhatsappNumber: patient?.whatsappNumber ?? "",
@@ -617,7 +620,9 @@ export class OutboundAutomationService {
   }
 
   private async nextReactivationAttempt(conversation: Conversation, now: Date): Promise<1 | 2 | undefined> {
-    const first = await this.options.repos.getOutboundDelivery(reactivationDeliveryKey(conversation.id, 1));
+    const first = await this.options.repos.getOutboundDelivery(
+      reactivationDeliveryKey(conversation.clinicId, conversation.id, 1)
+    );
 
     if (first?.status !== "sent") {
       return canReactivate({
@@ -631,7 +636,9 @@ export class OutboundAutomationService {
         : undefined;
     }
 
-    const second = await this.options.repos.getOutboundDelivery(reactivationDeliveryKey(conversation.id, 2));
+    const second = await this.options.repos.getOutboundDelivery(
+      reactivationDeliveryKey(conversation.clinicId, conversation.id, 2)
+    );
     if (second?.status === "sent") {
       return undefined;
     }
@@ -835,8 +842,8 @@ function reminderTemplateKind(kind: Exclude<ReminderKind, "none">): ReminderTemp
   }
 }
 
-function reactivationDeliveryKey(conversationId: string, attempt: 1 | 2): string {
-  return `reactivation:${conversationId}:${attempt}`;
+function reactivationDeliveryKey(clinicId: string, conversationId: string, attempt: 1 | 2): string {
+  return `reactivation:${clinicId}:${conversationId}:${attempt}`;
 }
 
 function freedSlotDeliveryKey(sourceAppointmentId: string, interestId: string, slotStartsAt: Date): string {
@@ -849,6 +856,11 @@ function reactivationTemplateName(attempt: 1 | 2): string {
 
 function reactivationTemplateKind(attempt: 1 | 2): ReactivationTemplateKind {
   return attempt === 1 ? "reactivation_1" : "reactivation_2";
+}
+
+function isSameDayRiskAppointment(input: { appointment: Appointment; profile: ClinicProfile }): boolean {
+  const service = input.profile.services.find((candidate) => candidate.id === input.appointment.serviceId);
+  return (service?.durationMinutes ?? 0) >= SAME_DAY_RISK_SERVICE_DURATION_MINUTES;
 }
 
 function formatAppointmentTime(appointmentTime: Date, timezone: string): string {

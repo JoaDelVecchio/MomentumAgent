@@ -61,7 +61,7 @@ describe("OutboundAutomationService reactivations", () => {
 
     expect(quietHoursSummary).toEqual({ sent: 0, blocked: 1, failed: 0, skipped: 0 });
     expect(context.provider.sentTemplateMessages).toEqual([]);
-    expect(await context.repos.getOutboundDelivery("reactivation:conv_1:1")).toBeUndefined();
+    expect(await context.repos.getOutboundDelivery("reactivation:clinic_1:conv_1:1")).toBeUndefined();
 
     const allowedHoursSummary = await context.service.runDueReactivations({
       clinicId: "clinic_1",
@@ -74,7 +74,7 @@ describe("OutboundAutomationService reactivations", () => {
         templateName: "lead_reactivation_1"
       })
     ]);
-    expect(await context.repos.getOutboundDelivery("reactivation:conv_1:1")).toEqual(
+    expect(await context.repos.getOutboundDelivery("reactivation:clinic_1:conv_1:1")).toEqual(
       expect.objectContaining({
         status: "sent",
         conversationId: "conv_1",
@@ -99,7 +99,7 @@ describe("OutboundAutomationService reactivations", () => {
 
     expect(pausedSummary).toEqual({ sent: 0, blocked: 1, failed: 0, skipped: 0 });
     expect(context.provider.sentTemplateMessages).toEqual([]);
-    expect(await context.repos.getOutboundDelivery("reactivation:conv_1:1")).toBeUndefined();
+    expect(await context.repos.getOutboundDelivery("reactivation:clinic_1:conv_1:1")).toBeUndefined();
 
     context.repos.saveConversation({
       id: "conv_1",
@@ -158,7 +158,7 @@ describe("OutboundAutomationService reactivations", () => {
 
     expect(sameClinicSummary).toEqual({ sent: 0, blocked: 1, failed: 0, skipped: 0 });
     expect(sameClinicAppointment.provider.sentTemplateMessages).toEqual([]);
-    expect(await sameClinicAppointment.repos.getOutboundDelivery("reactivation:conv_1:1")).toEqual(
+    expect(await sameClinicAppointment.repos.getOutboundDelivery("reactivation:clinic_1:conv_1:1")).toEqual(
       expect.objectContaining({
         status: "blocked",
         failureReason: "future_appointment"
@@ -187,7 +187,7 @@ describe("OutboundAutomationService reactivations", () => {
 
     expect(summary).toEqual({ sent: 0, blocked: 1, failed: 0, skipped: 0 });
     expect(optedOut.provider.sentTemplateMessages).toEqual([]);
-    expect(await optedOut.repos.getOutboundDelivery("reactivation:conv_1:1")).toEqual(
+    expect(await optedOut.repos.getOutboundDelivery("reactivation:clinic_1:conv_1:1")).toEqual(
       expect.objectContaining({
         status: "blocked",
         failureReason: "opt_out"
@@ -224,6 +224,78 @@ describe("OutboundAutomationService reactivations", () => {
       "lead_reactivation_2"
     ]);
   });
+
+  it("keeps reactivation delivery keys distinct when clinics share a conversation id", async () => {
+    const repos = new InMemoryRepositories();
+    const calendar = new FakeCalendar();
+    const provider = new FakeWhatsAppProvider();
+    const audit = new InMemoryAuditLog();
+    const templateService = new OutboundTemplateService({ repos, provider, audit });
+    const service = new OutboundAutomationService({ repos, calendar, templateService, audit });
+
+    repos.upsertClinicProfile(clinicProfile("clinic_1", "Clinica Demo"));
+    repos.upsertClinicProfile(clinicProfile("clinic_2", "Clinica Norte"));
+    repos.upsertPatient({ id: "pat_1", whatsappNumber: "+5491111111111", fullName: "Ana Gomez" });
+    repos.upsertPatient({ id: "pat_2", whatsappNumber: "+5491122222222", fullName: "Bruno Ruiz" });
+    repos.saveConversation({
+      id: "conv_shared",
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      botPaused: false,
+      pendingBooking: pendingBookingFixture(),
+      createdAt: new Date("2026-05-30T10:00:00.000Z"),
+      updatedAt: new Date("2026-06-01T10:00:00.000Z")
+    });
+    repos.saveConversation({
+      id: "conv_shared",
+      clinicId: "clinic_2",
+      patientId: "pat_2",
+      botPaused: false,
+      pendingBooking: pendingBookingFixture(),
+      createdAt: new Date("2026-05-30T10:00:00.000Z"),
+      updatedAt: new Date("2026-06-01T10:00:00.000Z")
+    });
+
+    const clinicOneSummary = await service.runDueReactivations({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:00:00.000Z")
+    });
+    const clinicTwoSummary = await service.runDueReactivations({
+      clinicId: "clinic_2",
+      now: new Date("2026-06-02T12:00:00.000Z")
+    });
+
+    expect(clinicOneSummary).toEqual({ sent: 1, blocked: 0, failed: 0, skipped: 0 });
+    expect(clinicTwoSummary).toEqual({ sent: 1, blocked: 0, failed: 0, skipped: 0 });
+    expect(provider.sentTemplateMessages).toEqual([
+      expect.objectContaining({
+        clinicId: "clinic_1",
+        to: "+5491111111111",
+        templateName: "lead_reactivation_1"
+      }),
+      expect.objectContaining({
+        clinicId: "clinic_2",
+        to: "+5491122222222",
+        templateName: "lead_reactivation_1"
+      })
+    ]);
+    expect(await repos.getOutboundDelivery("reactivation:clinic_1:conv_shared:1")).toEqual(
+      expect.objectContaining({
+        status: "sent",
+        clinicId: "clinic_1",
+        conversationId: "conv_shared",
+        patientId: "pat_1"
+      })
+    );
+    expect(await repos.getOutboundDelivery("reactivation:clinic_2:conv_shared:1")).toEqual(
+      expect.objectContaining({
+        status: "sent",
+        clinicId: "clinic_2",
+        conversationId: "conv_shared",
+        patientId: "pat_2"
+      })
+    );
+  });
 });
 
 function buildReactivationContext(input: {
@@ -256,10 +328,10 @@ function buildReactivationContext(input: {
   return { repos, calendar, provider, audit, templateService, service };
 }
 
-function clinicProfile(): ClinicProfile {
+function clinicProfile(clinicId = "clinic_1", name = "Clinica Demo"): ClinicProfile {
   return parseClinicProfile({
-    clinicId: "clinic_1",
-    name: "Clinica Demo",
+    clinicId,
+    name,
     timezone: "America/Argentina/Buenos_Aires",
     services: [
       {
