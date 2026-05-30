@@ -1,8 +1,8 @@
 import { parseClinicProfile } from "../domain/clinic-profile.js";
 
-export function buildDemoClinicProfile() {
+export function buildDemoClinicProfile(clinicId = "clinic_1") {
   return parseClinicProfile({
-    clinicId: "clinic_1",
+    clinicId,
     name: "Clinica Demo",
     timezone: "America/Argentina/Buenos_Aires",
     services: [

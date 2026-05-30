@@ -1,0 +1,150 @@
+import { PrismaClient } from "@prisma/client";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { GoogleOAuthClient } from "../src/adapters/google/google-oauth.js";
+import {
+  Aes256GcmTokenCipher,
+  PrismaCalendarCredentialRepository
+} from "../src/adapters/prisma/calendar-auth-repository.js";
+import { PrismaAuditLog } from "../src/adapters/prisma/audit-log.js";
+import { buildGoogleCalendarRuntime, buildWhatsAppRuntime } from "../src/runtime/server-runtime.js";
+import { createPrismaTestContext, type PrismaTestContext } from "./helpers/prisma.js";
+
+describe("server runtime persistence wiring", () => {
+  let context: PrismaTestContext;
+  let prisma: PrismaClient;
+
+  beforeAll(() => {
+    context = createPrismaTestContext("momentum-server-runtime-");
+    prisma = context.prisma;
+  });
+
+  afterAll(async () => {
+    await context.cleanup();
+  });
+
+  it("seeds the configured clinic id for Kapso persistence", async () => {
+    const runtime = await buildWhatsAppRuntime({
+      prisma,
+      clinicId: "clinic_runtime_kapso",
+      config: {
+        provider: "kapso",
+        apiKey: "kapso_api_key",
+        webhookSecret: "kapso_webhook_secret",
+        phoneNumberId: "123456789012345"
+      },
+      calendarProvider: "fake"
+    });
+
+    const audit = new PrismaAuditLog(prisma);
+    const event = await audit.record({
+      clinicId: "clinic_runtime_kapso",
+      type: "whatsapp.inbound.accepted",
+      message: "Accepted WhatsApp inbound delivery",
+      metadata: { idempotencyKey: "delivery_runtime" }
+    });
+
+    expect(runtime.webhook.phoneNumberClinicMap).toEqual({
+      "123456789012345": "clinic_runtime_kapso"
+    });
+    expect(await prisma.clinic.findUnique({ where: { id: "clinic_runtime_kapso" } })).toMatchObject({
+      id: "clinic_runtime_kapso"
+    });
+    expect(event.clinicId).toBe("clinic_runtime_kapso");
+  });
+
+  it("seeds the configured clinic id for Google credential persistence", async () => {
+    const clinicId = "clinic_runtime_google";
+    await buildGoogleCalendarRuntime({
+      prisma,
+      env: {
+        ...process.env,
+        SIMULATION_CLINIC_ID: clinicId,
+        GOOGLE_CALENDAR_CLIENT_ID: "google-client-id",
+        GOOGLE_CALENDAR_CLIENT_SECRET: "google-client-secret",
+        GOOGLE_CALENDAR_REDIRECT_URI: "http://localhost:3000/integrations/google-calendar/callback",
+        GOOGLE_CALENDAR_OAUTH_STATE_SECRET: "google-state-secret",
+        GOOGLE_CALENDAR_SETUP_TOKEN: "google-setup-token",
+        TOKEN_ENCRYPTION_KEY: "01".repeat(32)
+      },
+      googleOAuthClientFactory: (config) => new FakeGoogleOAuthClient(config)
+    });
+    const credentials = new PrismaCalendarCredentialRepository(
+      prisma,
+      new Aes256GcmTokenCipher("01".repeat(32), () => Buffer.alloc(12, 4))
+    );
+    const callbackClinicId = "clinic_runtime_google_callback";
+    const runtime = await buildGoogleCalendarRuntime({
+      prisma,
+      env: {
+        ...process.env,
+        SIMULATION_CLINIC_ID: clinicId,
+        GOOGLE_CALENDAR_CLIENT_ID: "google-client-id",
+        GOOGLE_CALENDAR_CLIENT_SECRET: "google-client-secret",
+        GOOGLE_CALENDAR_REDIRECT_URI: "http://localhost:3000/integrations/google-calendar/callback",
+        GOOGLE_CALENDAR_OAUTH_STATE_SECRET: "google-state-secret",
+        GOOGLE_CALENDAR_SETUP_TOKEN: "google-setup-token",
+        TOKEN_ENCRYPTION_KEY: "01".repeat(32)
+      },
+      googleOAuthClientFactory: (config) => new FakeGoogleOAuthClient(config)
+    });
+    const state = new URL(runtime.oauthService.createAuthorizationUrl(callbackClinicId)).searchParams.get("state");
+
+    await credentials.save({
+      clinicId,
+      provider: "google",
+      scopes: ["https://www.googleapis.com/auth/calendar.events"],
+      refreshToken: "google_refresh_token"
+    });
+
+    await expect(prisma.clinic.findUnique({ where: { id: clinicId } })).resolves.toMatchObject({ id: clinicId });
+    await expect(credentials.get({ clinicId, provider: "google" })).resolves.toMatchObject({
+      clinicId,
+      provider: "google",
+      refreshToken: "google_refresh_token"
+    });
+
+    await runtime.oauthService.handleCallback("oauth_code", state ?? "");
+    await expect(credentials.get({ clinicId: callbackClinicId, provider: "google" })).resolves.toMatchObject({
+      clinicId: callbackClinicId,
+      provider: "google",
+      refreshToken: "google_refresh_token_from_callback"
+    });
+  });
+});
+
+class FakeGoogleOAuthClient implements GoogleOAuthClient {
+  constructor(private readonly config: { clientId: string; redirectUri: string }) {}
+
+  generateAuthUrl(input: {
+    access_type: "offline";
+    prompt: "consent";
+    scope: string[];
+    state: string;
+    include_granted_scopes: boolean;
+  }) {
+    const params = new URLSearchParams({
+      client_id: this.config.clientId,
+      redirect_uri: this.config.redirectUri,
+      access_type: input.access_type,
+      prompt: input.prompt,
+      scope: input.scope.join(" "),
+      state: input.state,
+      include_granted_scopes: String(input.include_granted_scopes)
+    });
+    return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  }
+
+  async getToken(_input: { code: string }) {
+    return {
+      tokens: {
+        access_token: "google_access_token_from_callback",
+        refresh_token: "google_refresh_token_from_callback",
+        expiry_date: Date.parse("2026-06-01T12:00:00.000Z"),
+        scope: [
+          "https://www.googleapis.com/auth/calendar.events",
+          "https://www.googleapis.com/auth/calendar.events.freebusy"
+        ].join(" ")
+      }
+    };
+  }
+}
