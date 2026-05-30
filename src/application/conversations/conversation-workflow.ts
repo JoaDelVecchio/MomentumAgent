@@ -429,11 +429,11 @@ function extractPendingPatientFullName(text: string, intent: ConversationUnderst
     if (intent.confidence < SIDE_EFFECT_CONFIDENCE_THRESHOLD) {
       return undefined;
     }
-    return normalizeFullName(intent.patientFullName ?? "");
+    return normalizeFullNameIfComplete(intent.patientFullName ?? "");
   }
 
   if (intent.intent === "question") {
-    return normalizeFullName(text);
+    return normalizeFullNameIfComplete(text);
   }
 
   return undefined;
@@ -444,11 +444,12 @@ function isLowConfidenceSideEffectIntent(intent: ConversationUnderstanding) {
     return false;
   }
 
-  if (intent.intent === "book") {
-    return Boolean(intent.serviceName);
-  }
-
-  return intent.intent === "confirm" || intent.intent === "cancel" || intent.intent === "reschedule";
+  return (
+    intent.intent === "book" ||
+    intent.intent === "confirm" ||
+    intent.intent === "cancel" ||
+    intent.intent === "reschedule"
+  );
 }
 
 function buildBookingFaqPrefix(profile: Parameters<typeof buildFaqResponse>[0], intent: ConversationUnderstanding) {
@@ -494,6 +495,11 @@ function hasOperationalActionLanguage(text: string) {
 function normalizeFullName(text: string) {
   const normalized = text.replace(/[^\p{L}\s'-]/gu, " ").replace(/\s+/g, " ").trim();
   return normalized.length >= 5 ? normalized : undefined;
+}
+
+function normalizeFullNameIfComplete(text: string) {
+  const normalized = normalizeFullName(text);
+  return normalized && normalized.split(" ").length >= 2 ? normalized : undefined;
 }
 
 function startOfDay(date: Date) {
