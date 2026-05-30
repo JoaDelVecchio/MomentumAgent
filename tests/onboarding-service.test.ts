@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { InMemoryCalendarCredentialRepository } from "../src/adapters/memory/calendar-auth-repository.js";
 import { InMemoryOnboardingRepository } from "../src/adapters/memory/onboarding-repository.js";
 import { InMemoryRepositories } from "../src/adapters/memory/repositories.js";
 import { OnboardingService } from "../src/application/onboarding/onboarding-service.js";
+import { GOOGLE_CALENDAR_SCOPES } from "../src/config/google-calendar.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
 
 describe("OnboardingService", () => {
@@ -117,6 +119,113 @@ describe("OnboardingService", () => {
       context.service.activateClinic({ clinicId: "clinic_1", now: new Date("2026-06-01T12:04:00.000Z") })
     ).resolves.toEqual(expect.objectContaining({ lifecycleState: "active", paymentStatus: "trial" }));
     await expect(context.service.isClinicActive("clinic_1")).resolves.toBe(true);
+  });
+
+  it("keeps calendar readiness missing until Google credentials and mapped professional calendars exist", async () => {
+    const context = buildContext();
+    const credentials = new InMemoryCalendarCredentialRepository();
+    const service = new OnboardingService({
+      onboarding: context.onboarding,
+      operational: context.operational,
+      calendarCredentials: credentials,
+      calendarRequiredScopes: [...GOOGLE_CALENDAR_SCOPES],
+      now: () => new Date("2026-06-01T12:00:00.000Z")
+    });
+    await service.createManualClinic({
+      clinicId: "clinic_1",
+      clinicName: "Clinica Demo",
+      primaryContactName: "Ana Manager",
+      primaryContactPhone: "+5491111111111",
+      city: "Buenos Aires",
+      country: "Argentina",
+      source: "presencial",
+      now: new Date("2026-06-01T12:00:00.000Z")
+    });
+    await service.updatePaymentStatus({ clinicId: "clinic_1", paymentStatus: "trial" });
+    await service.updateReadinessFlags({
+      clinicId: "clinic_1",
+      whatsappReady: true,
+      calendarConnected: true,
+      testConversationPassed: true,
+      activationChecklistCompleted: true
+    });
+    await service.saveClinicProfile({
+      ...profile("clinic_1"),
+      professionals: [{ ...profile("clinic_1").professionals[0], calendarId: "" }]
+    });
+
+    await expect(service.readiness("clinic_1")).resolves.toEqual({
+      clinicId: "clinic_1",
+      ready: false,
+      missing: ["clinic_profile", "calendar"]
+    });
+
+    await credentials.save({
+      clinicId: "clinic_1",
+      provider: "google",
+      scopes: [...GOOGLE_CALENDAR_SCOPES],
+      accessToken: "access_token",
+      refreshToken: "refresh_token"
+    });
+    await service.saveClinicProfile(profile("clinic_1"));
+
+    await expect(service.readiness("clinic_1")).resolves.toEqual({
+      clinicId: "clinic_1",
+      ready: true,
+      missing: []
+    });
+  });
+
+  it("rejects duplicate professional calendar mappings in Google readiness mode", async () => {
+    const context = buildContext();
+    const credentials = new InMemoryCalendarCredentialRepository();
+    const service = new OnboardingService({
+      onboarding: context.onboarding,
+      operational: context.operational,
+      calendarCredentials: credentials,
+      calendarRequiredScopes: [...GOOGLE_CALENDAR_SCOPES],
+      now: () => new Date("2026-06-01T12:00:00.000Z")
+    });
+    await service.createManualClinic({
+      clinicId: "clinic_1",
+      clinicName: "Clinica Demo",
+      primaryContactName: "Ana Manager",
+      primaryContactPhone: "+5491111111111",
+      city: "Buenos Aires",
+      country: "Argentina",
+      source: "presencial",
+      now: new Date("2026-06-01T12:00:00.000Z")
+    });
+    await service.updatePaymentStatus({ clinicId: "clinic_1", paymentStatus: "trial" });
+    await service.updateReadinessFlags({
+      clinicId: "clinic_1",
+      whatsappReady: true,
+      calendarConnected: true,
+      testConversationPassed: true,
+      activationChecklistCompleted: true
+    });
+    await credentials.save({
+      clinicId: "clinic_1",
+      provider: "google",
+      scopes: [...GOOGLE_CALENDAR_SCOPES],
+      accessToken: "access_token",
+      refreshToken: "refresh_token"
+    });
+
+    await service.saveClinicProfile({
+      ...profile("clinic_1"),
+      professionals: [
+        { ...profile("clinic_1").professionals[0], id: "pro_perez", calendarId: "shared_calendar" },
+        { ...profile("clinic_1").professionals[0], id: "pro_gomez", name: "Dra. Gomez", calendarId: "shared_calendar" }
+      ],
+      services: [{ ...profile("clinic_1").services[0], professionalIds: ["pro_perez", "pro_gomez"] }]
+    });
+
+    await expect(service.readiness("clinic_1")).resolves.toMatchObject({
+      clinicId: "clinic_1",
+      ready: false,
+      missing: ["calendar"]
+    });
   });
 
   it("blocks activation when the stored profile has no services or professional calendars", async () => {

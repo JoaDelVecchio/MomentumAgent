@@ -2,6 +2,7 @@ import type {
   CalendarCredentialRepository,
   CalendarCredentials
 } from "../../ports/calendar-auth.js";
+import type { ClinicProfile } from "../../domain/types.js";
 
 export type GoogleCalendarConnectionStatus = {
   provider: "google";
@@ -92,4 +93,24 @@ export function googleCalendarConnectionStatus(input: {
     grantedScopes: [...grantedScopes],
     missingScopes
   };
+}
+
+export function hasUsableProfessionalCalendarMappings(profile: ClinicProfile | undefined): boolean {
+  if (!profile) {
+    return false;
+  }
+  const calendarIds = profile.professionals
+    .map((professional) => professional.calendarId.trim())
+    .filter((calendarId) => calendarId.length > 0);
+  if (calendarIds.length === 0 || new Set(calendarIds).size !== calendarIds.length) {
+    return false;
+  }
+  const mappedProfessionalIds = new Set(
+    profile.professionals
+      .filter((professional) => professional.calendarId.trim().length > 0)
+      .map((professional) => professional.id)
+  );
+  return profile.services.every((service) =>
+    service.professionalIds.some((professionalId) => mappedProfessionalIds.has(professionalId))
+  );
 }

@@ -1,4 +1,5 @@
 import type { ClinicProfile, Id } from "../../domain/types.js";
+import type { CalendarCredentialRepository, CalendarCredentials } from "../../ports/calendar-auth.js";
 import type {
   ClinicKnowledgeRecord,
   ClinicLeadInput,
@@ -10,10 +11,16 @@ import type {
   OnboardingRepository
 } from "../../ports/onboarding.js";
 import type { OperationalRepository } from "../../ports/repositories.js";
+import {
+  googleCalendarConnectionStatus,
+  hasUsableProfessionalCalendarMappings
+} from "./google-calendar-onboarding-service.js";
 
 export type OnboardingServiceOptions = {
   onboarding: OnboardingRepository;
   operational: OperationalRepository;
+  calendarCredentials?: CalendarCredentialRepository;
+  calendarRequiredScopes?: string[];
   now?: () => Date;
 };
 
@@ -160,17 +167,19 @@ export class OnboardingService {
   }
 
   async readiness(clinicId: Id): Promise<ClinicReadiness> {
-    const [setup, profile] = await Promise.all([
+    const [setup, profile, googleCredentials] = await Promise.all([
       this.options.onboarding.getClinicSetup(clinicId),
-      this.options.operational.getClinicProfile(clinicId)
+      this.options.operational.getClinicProfile(clinicId),
+      this.options.calendarCredentials?.get({ clinicId, provider: "google" })
     ]);
     const paymentOk =
       setup?.paymentStatus === "paid" || setup?.paymentStatus === "trial" || setup?.paymentStatus === "waived";
+    const calendarOk = this.isCalendarReady(setup, profile, googleCredentials);
     const missing = [
       !isCompleteOperationalProfile(profile) ? "clinic_profile" : undefined,
       !paymentOk ? "payment" : undefined,
       !setup?.whatsappReady ? "whatsapp" : undefined,
-      !setup?.calendarConnected ? "calendar" : undefined,
+      !calendarOk ? "calendar" : undefined,
       !setup?.testConversationPassed ? "test_conversation" : undefined,
       !setup?.activationChecklistCompleted ? "activation_checklist" : undefined
     ].filter((value): value is string => Boolean(value));
@@ -221,6 +230,21 @@ export class OnboardingService {
 
   private currentDate(override?: Date): Date {
     return new Date(override ?? this.options.now?.() ?? new Date());
+  }
+
+  private isCalendarReady(
+    setup: ClinicSetupRecord | undefined,
+    profile: ClinicProfile | undefined,
+    googleCredentials: CalendarCredentials | undefined
+  ): boolean {
+    if (!this.options.calendarCredentials) {
+      return Boolean(setup?.calendarConnected);
+    }
+    const status = googleCalendarConnectionStatus({
+      credentials: googleCredentials,
+      requiredScopes: this.options.calendarRequiredScopes ?? []
+    });
+    return status.connected && !status.reconnectRequired && hasUsableProfessionalCalendarMappings(profile);
   }
 }
 
