@@ -63,8 +63,16 @@ export async function buildGoogleCalendarRuntime(input: {
   });
 
   return {
+    config,
+    credentialRepository: credentials,
     setupToken: config.setupToken,
     oauthService: new GoogleOAuthService(config, credentials, input.googleOAuthClientFactory),
+    createCalendarClient: (targetClinicId: string) =>
+      new GoogleCalendarApiClient({
+        clinicId: targetClinicId,
+        credentialRepository: credentials,
+        config
+      }),
     calendar: new GoogleCalendarAdapter(client, { timezone })
   };
 }

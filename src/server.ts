@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaOnboardingRepository } from "./adapters/prisma/onboarding-repository.js";
 import { PrismaOperationalRepository } from "./adapters/prisma/operational-repository.js";
 import { buildApp } from "./api/app.js";
+import { GoogleCalendarOnboardingService } from "./application/onboarding/google-calendar-onboarding-service.js";
 import { OnboardingService } from "./application/onboarding/onboarding-service.js";
 import { readAdminConfig } from "./config/admin.js";
 import { readOutboundConfig } from "./config/outbound.js";
@@ -39,9 +40,20 @@ const onboardingService = onboardingRuntimeNeeded
       ),
       operational: new PrismaOperationalRepository(
         requireOnboardingPrisma(sharedPrisma, adminConfig.enabled ? "admin" : "productionActivation")
-      )
+      ),
+      calendarCredentials: googleRuntime?.credentialRepository,
+      calendarRequiredScopes: googleRuntime?.config.scopes
     })
   : undefined;
+const googleCalendarOnboardingService =
+  adminConfig.enabled && googleRuntime
+    ? new GoogleCalendarOnboardingService({
+        credentials: googleRuntime.credentialRepository,
+        requiredScopes: googleRuntime.config.scopes,
+        oauthService: googleRuntime.oauthService,
+        calendarClientFactory: googleRuntime.createCalendarClient
+      })
+    : undefined;
 const clinicActivation = onboardingService
   ? { isClinicActive: (clinicId: string) => onboardingService.isClinicActive(clinicId) }
   : undefined;
@@ -72,6 +84,10 @@ const app = buildApp({
   onboarding:
     adminConfig.enabled && onboardingService
       ? { adminToken: adminConfig.token, service: onboardingService }
+      : undefined,
+  googleCalendarOnboarding:
+    adminConfig.enabled && googleCalendarOnboardingService
+      ? { adminToken: adminConfig.token, service: googleCalendarOnboardingService }
       : undefined
 });
 

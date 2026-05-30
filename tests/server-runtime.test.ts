@@ -7,6 +7,7 @@ import {
 } from "../src/adapters/prisma/calendar-auth-repository.js";
 import { PrismaOperationalRepository } from "../src/adapters/prisma/operational-repository.js";
 import type { ConversationInterpreter, ConversationInterpreterInput } from "../src/application/conversations/interpreter.js";
+import { GOOGLE_CALENDAR_SCOPES } from "../src/config/google-calendar.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
 import {
   buildGoogleCalendarRuntime,
@@ -176,6 +177,22 @@ describe("server runtime persistence wiring", () => {
       refreshToken: "google_refresh_token_from_callback"
     });
   });
+
+  it("exposes Google Calendar onboarding dependencies from the Google runtime", async () => {
+    const context = createPrismaTestContext("momentum-google-runtime-onboarding-");
+    try {
+      const runtime = await buildGoogleCalendarRuntime({
+        prisma: context.prisma,
+        env: googleRuntimeEnv()
+      });
+
+      expect(runtime.config.scopes).toEqual([...GOOGLE_CALENDAR_SCOPES]);
+      expect(runtime.credentialRepository).toBeDefined();
+      expect(runtime.createCalendarClient("clinic_runtime_onboarding")).toBeDefined();
+    } finally {
+      await context.cleanup();
+    }
+  });
 });
 
 describe("server startup runtime decisions", () => {
@@ -265,6 +282,16 @@ function profile(clinicId: string) {
   });
 }
 
+function googleRuntimeEnv(): NodeJS.ProcessEnv {
+  return {
+    GOOGLE_CALENDAR_CLIENT_ID: "google-client-id",
+    GOOGLE_CALENDAR_CLIENT_SECRET: "google-client-secret",
+    GOOGLE_CALENDAR_REDIRECT_URI: "http://localhost:3000/integrations/google-calendar/callback",
+    GOOGLE_CALENDAR_SETUP_TOKEN: "google-setup-token",
+    TOKEN_ENCRYPTION_KEY: "01".repeat(32)
+  };
+}
+
 class FakeGoogleOAuthClient implements GoogleOAuthClient {
   constructor(private readonly config: { clientId: string; redirectUri: string }) {}
 
@@ -293,10 +320,7 @@ class FakeGoogleOAuthClient implements GoogleOAuthClient {
         access_token: "google_access_token_from_callback",
         refresh_token: "google_refresh_token_from_callback",
         expiry_date: Date.parse("2026-06-01T12:00:00.000Z"),
-        scope: [
-          "https://www.googleapis.com/auth/calendar.events",
-          "https://www.googleapis.com/auth/calendar.events.freebusy"
-        ].join(" ")
+        scope: GOOGLE_CALENDAR_SCOPES.join(" ")
       }
     };
   }
