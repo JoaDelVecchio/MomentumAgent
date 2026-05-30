@@ -397,123 +397,131 @@ export class OutboundAutomationService {
     now: Date;
     summary: OutboundAutomationSummary;
   }) {
-    const key = reminderDeliveryKey(input.appointment.id, input.kind);
-    const patient = await this.options.repos.getPatient(input.appointment.patientId);
-    const conversations = patient
-      ? await this.options.repos.listConversationsByPatient({
-          clinicId: input.appointment.clinicId,
-          patientId: input.appointment.patientId
-        })
-      : [];
-
-    const patientOptedOut = patient ? await this.options.repos.isOptedOut(patient.whatsappNumber) : false;
-    if (
-      patient &&
-      !patientOptedOut &&
-      isInsideQuietHours({ now: input.now, timezone: input.profile.timezone })
-    ) {
-      input.summary.blocked += 1;
-      await this.auditQuietHoursBlock({
-        appointment: input.appointment,
-        patient,
-        conversationId: conversations[0]?.id
-      });
-      return;
-    }
-
-    const claim = await this.options.repos.claimOutboundDelivery({
-      key,
-      clinicId: input.appointment.clinicId,
-      automationType: "reminder",
-      toWhatsappNumber: patient?.whatsappNumber ?? "",
-      patientId: input.appointment.patientId,
-      conversationId: conversations[0]?.id,
-      appointmentId: input.appointment.id,
-      templateName: reminderTemplateName(input.kind),
-      metadata: {
-        kind: input.kind,
-        appointmentStartsAt: input.appointment.startsAt.toISOString()
-      },
-      now: input.now
-    });
-
-    if (claim.kind === "existing") {
-      input.summary.skipped += 1;
-      return;
-    }
-
-    try {
-      if (!patient) {
-        input.summary.blocked += 1;
-        await this.blockDelivery({ delivery: claim.delivery, reason: "missing_patient", now: input.now });
+    await this.options.repos.withAppointmentLock(input.appointment.id, async () => {
+      const appointment = await this.options.repos.getAppointment(input.appointment.id);
+      if (!appointmentMatchesReminderCandidate(appointment, input.appointment)) {
+        input.summary.skipped += 1;
         return;
       }
 
-      const blockReason = await this.reminderBlockReason({
-        appointment: input.appointment,
-        profile: input.profile,
-        patient,
+      const key = reminderDeliveryKey(appointment.id, input.kind);
+      const patient = await this.options.repos.getPatient(appointment.patientId);
+      const conversations = patient
+        ? await this.options.repos.listConversationsByPatient({
+            clinicId: appointment.clinicId,
+            patientId: appointment.patientId
+          })
+        : [];
+
+      const patientOptedOut = patient ? await this.options.repos.isOptedOut(patient.whatsappNumber) : false;
+      if (
+        patient &&
+        !patientOptedOut &&
+        isInsideQuietHours({ now: input.now, timezone: input.profile.timezone })
+      ) {
+        input.summary.blocked += 1;
+        await this.auditQuietHoursBlock({
+          appointment,
+          patient,
+          conversationId: conversations[0]?.id
+        });
+        return;
+      }
+
+      const claim = await this.options.repos.claimOutboundDelivery({
+        key,
+        clinicId: appointment.clinicId,
+        automationType: "reminder",
+        toWhatsappNumber: patient?.whatsappNumber ?? "",
+        patientId: appointment.patientId,
+        conversationId: conversations[0]?.id,
+        appointmentId: appointment.id,
+        templateName: reminderTemplateName(input.kind),
+        metadata: {
+          kind: input.kind,
+          appointmentStartsAt: appointment.startsAt.toISOString()
+        },
         now: input.now
       });
-      if (blockReason) {
-        input.summary.blocked += 1;
-        await this.blockDelivery({ delivery: claim.delivery, reason: blockReason, now: input.now });
+
+      if (claim.kind === "existing") {
+        input.summary.skipped += 1;
         return;
       }
 
-      const service = input.profile.services.find((candidate) => candidate.id === input.appointment.serviceId);
-      if (!service) {
-        input.summary.blocked += 1;
-        await this.blockDelivery({ delivery: claim.delivery, reason: "missing_service", now: input.now });
-        return;
-      }
-
-      const result = await this.options.templateService.sendApprovedTemplate(
-        buildOutboundTemplate({
-          clinicId: input.appointment.clinicId,
-          to: patient.whatsappNumber,
-          kind: reminderTemplateKind(input.kind),
-          parameters: {
-            clinicName: input.profile.name,
-            serviceName: service.name,
-            appointmentTimeText: formatAppointmentTime(input.appointment.startsAt, input.profile.timezone)
-          }
-        })
-      );
-
-      if (result.status === "blocked_opt_out") {
-        input.summary.blocked += 1;
-        await this.blockDelivery({ delivery: claim.delivery, reason: "opt_out", now: input.now });
-        return;
-      }
-
-      await this.options.repos.markOutboundDeliverySent({
-        key: claim.delivery.key,
-        providerMessageId: result.providerMessageId,
-        sentAt: input.now
-      });
-      input.summary.sent += 1;
-      await this.options.audit.record({
-        clinicId: claim.delivery.clinicId,
-        conversationId: claim.delivery.conversationId,
-        type: "outbound.reminder.sent",
-        message: "Sent appointment reminder",
-        metadata: {
-          key: claim.delivery.key,
-          appointmentId: input.appointment.id,
-          patientId: patient.id,
-          kind: input.kind,
-          providerMessageId: result.providerMessageId
+      try {
+        if (!patient) {
+          input.summary.blocked += 1;
+          await this.blockDelivery({ delivery: claim.delivery, reason: "missing_patient", now: input.now });
+          return;
         }
-      });
-    } catch (error) {
-      await this.handleClaimedDeliveryError({
-        delivery: claim.delivery,
-        reason: errorMessage(error),
-        now: input.now,
-        summary: input.summary
-      });
-    }
+
+        const blockReason = await this.reminderBlockReason({
+          appointment,
+          profile: input.profile,
+          patient,
+          now: input.now
+        });
+        if (blockReason) {
+          input.summary.blocked += 1;
+          await this.blockDelivery({ delivery: claim.delivery, reason: blockReason, now: input.now });
+          return;
+        }
+
+        const service = input.profile.services.find((candidate) => candidate.id === appointment.serviceId);
+        if (!service) {
+          input.summary.blocked += 1;
+          await this.blockDelivery({ delivery: claim.delivery, reason: "missing_service", now: input.now });
+          return;
+        }
+
+        const result = await this.options.templateService.sendApprovedTemplate(
+          buildOutboundTemplate({
+            clinicId: appointment.clinicId,
+            to: patient.whatsappNumber,
+            kind: reminderTemplateKind(input.kind),
+            parameters: {
+              clinicName: input.profile.name,
+              serviceName: service.name,
+              appointmentTimeText: formatAppointmentTime(appointment.startsAt, input.profile.timezone)
+            }
+          })
+        );
+
+        if (result.status === "blocked_opt_out") {
+          input.summary.blocked += 1;
+          await this.blockDelivery({ delivery: claim.delivery, reason: "opt_out", now: input.now });
+          return;
+        }
+
+        await this.options.repos.markOutboundDeliverySent({
+          key: claim.delivery.key,
+          providerMessageId: result.providerMessageId,
+          sentAt: input.now
+        });
+        input.summary.sent += 1;
+        await this.options.audit.record({
+          clinicId: claim.delivery.clinicId,
+          conversationId: claim.delivery.conversationId,
+          type: "outbound.reminder.sent",
+          message: "Sent appointment reminder",
+          metadata: {
+            key: claim.delivery.key,
+            appointmentId: appointment.id,
+            patientId: patient.id,
+            kind: input.kind,
+            providerMessageId: result.providerMessageId
+          }
+        });
+      } catch (error) {
+        await this.handleClaimedDeliveryError({
+          delivery: claim.delivery,
+          reason: errorMessage(error),
+          now: input.now,
+          summary: input.summary
+        });
+      }
+    });
   }
 
   private async sentReminderKinds(appointmentId: string): Promise<Exclude<ReminderKind, "none">[]> {
@@ -861,6 +869,21 @@ function reactivationTemplateKind(attempt: 1 | 2): ReactivationTemplateKind {
 function isSameDayRiskAppointment(input: { appointment: Appointment; profile: ClinicProfile }): boolean {
   const service = input.profile.services.find((candidate) => candidate.id === input.appointment.serviceId);
   return (service?.durationMinutes ?? 0) >= SAME_DAY_RISK_SERVICE_DURATION_MINUTES;
+}
+
+function appointmentMatchesReminderCandidate(
+  appointment: Appointment | undefined,
+  candidate: Appointment
+): appointment is Appointment {
+  return (
+    appointment !== undefined &&
+    appointment.clinicId === candidate.clinicId &&
+    appointment.status === "scheduled" &&
+    appointment.startsAt.getTime() === candidate.startsAt.getTime() &&
+    appointment.endsAt.getTime() === candidate.endsAt.getTime() &&
+    appointment.calendarEventId === candidate.calendarEventId &&
+    appointment.calendarId === candidate.calendarId
+  );
 }
 
 function formatAppointmentTime(appointmentTime: Date, timezone: string): string {

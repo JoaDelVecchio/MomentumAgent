@@ -273,15 +273,66 @@ describe("OutboundAutomationService reminders", () => {
       })
     );
   });
+
+  it("skips a reminder when the appointment is cancelled after the due scan", async () => {
+    const repos = new MutatingAfterReminderScanRepositories((scanned) => {
+      const appointment = scanned.find((candidate) => candidate.id === "appt_1");
+      if (!appointment) {
+        return;
+      }
+      repos.saveAppointment({ ...appointment, status: "cancelled" });
+    });
+    const context = await buildReminderContext({
+      repos,
+      appointmentStartsAt: new Date("2026-06-03T12:00:00.000Z")
+    });
+
+    const summary = await context.service.runDueReminders({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:00:00.000Z")
+    });
+
+    expect(summary).toEqual({ sent: 0, blocked: 0, failed: 0, skipped: 1 });
+    expect(context.provider.sentTemplateMessages).toEqual([]);
+    expect(await context.repos.getOutboundDelivery("reminder:appt_1:24h")).toBeUndefined();
+  });
+
+  it("skips a reminder when the appointment is rescheduled after the due scan", async () => {
+    const repos = new MutatingAfterReminderScanRepositories((scanned) => {
+      const appointment = scanned.find((candidate) => candidate.id === "appt_1");
+      if (!appointment) {
+        return;
+      }
+      repos.saveAppointment({
+        ...appointment,
+        startsAt: new Date("2026-06-04T12:00:00.000Z"),
+        endsAt: new Date("2026-06-04T12:30:00.000Z")
+      });
+    });
+    const context = await buildReminderContext({
+      repos,
+      appointmentStartsAt: new Date("2026-06-03T12:00:00.000Z")
+    });
+
+    const summary = await context.service.runDueReminders({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:00:00.000Z")
+    });
+
+    expect(summary).toEqual({ sent: 0, blocked: 0, failed: 0, skipped: 1 });
+    expect(context.provider.sentTemplateMessages).toEqual([]);
+    expect(await context.repos.getOutboundDelivery("reminder:appt_1:24h")).toBeUndefined();
+  });
 });
 
 async function buildReminderContext(input: {
+  repos?: InMemoryRepositories;
   appointmentStartsAt: Date;
   conversation?: Partial<Conversation>;
   appointment?: Partial<Appointment>;
   serviceDurationMinutes?: number;
 }) {
-  const repos = new InMemoryRepositories();
+  const repos = input.repos ?? new InMemoryRepositories();
   const calendar = new FakeCalendar();
   const provider = new FakeWhatsAppProvider();
   const audit = new InMemoryAuditLog();
@@ -317,6 +368,23 @@ async function buildReminderContext(input: {
   repos.saveAppointment(appointment);
 
   return { repos, calendar, provider, audit, templateService, service };
+}
+
+class MutatingAfterReminderScanRepositories extends InMemoryRepositories {
+  private mutated = false;
+
+  constructor(private readonly mutate: (appointments: Appointment[]) => void) {
+    super();
+  }
+
+  override listScheduledAppointments(input: Parameters<InMemoryRepositories["listScheduledAppointments"]>[0]) {
+    const appointments = super.listScheduledAppointments(input);
+    if (!this.mutated) {
+      this.mutated = true;
+      this.mutate(appointments);
+    }
+    return appointments;
+  }
 }
 
 function clinicProfile(serviceDurationMinutes = 30): ClinicProfile {
