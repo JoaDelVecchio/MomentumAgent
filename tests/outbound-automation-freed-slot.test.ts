@@ -8,6 +8,7 @@ import { OutboundAutomationService } from "../src/application/outbound/outbound-
 import { SchedulingService, type FreedSlotHandler } from "../src/application/scheduling/scheduling-service.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
 import type { Appointment, ClinicProfile, TimeSlot } from "../src/domain/types.js";
+import type { AuditEventInput } from "../src/ports/audit-log.js";
 import type { Conversation, PatientInterest } from "../src/ports/repositories.js";
 
 describe("OutboundAutomationService freed-slot offers", () => {
@@ -109,6 +110,50 @@ describe("OutboundAutomationService freed-slot offers", () => {
       })
     );
   });
+
+  it("does not consume the freed-slot key while paused and can send it after unpause", async () => {
+    const context = buildFreedSlotContext({
+      conversation: { botPaused: true }
+    });
+
+    const pausedSummary = await context.service.handleFreedSlot({
+      clinicId: "clinic_1",
+      serviceId: "svc_botox",
+      sourceAppointmentId: "appt_cancelled",
+      slot: freedSlot(),
+      now: new Date("2026-06-04T12:00:00.000Z")
+    });
+
+    expect(pausedSummary).toEqual({ sent: 0, blocked: 1, failed: 0, skipped: 0 });
+    expect(await context.repos.getOutboundDelivery(freedSlotDeliveryKey())).toBeUndefined();
+    expect(context.provider.sentTemplateMessages).toEqual([]);
+
+    context.repos.saveConversation({
+      id: "conv_1",
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      botPaused: false,
+      createdAt: new Date("2026-05-30T10:00:00.000Z"),
+      updatedAt: new Date("2026-06-04T12:05:00.000Z")
+    });
+
+    const unpausedSummary = await context.service.handleFreedSlot({
+      clinicId: "clinic_1",
+      serviceId: "svc_botox",
+      sourceAppointmentId: "appt_cancelled",
+      slot: freedSlot(),
+      now: new Date("2026-06-04T12:05:00.000Z")
+    });
+
+    expect(unpausedSummary).toEqual({ sent: 1, blocked: 0, failed: 0, skipped: 0 });
+    expect(await context.repos.getOutboundDelivery(freedSlotDeliveryKey())).toEqual(
+      expect.objectContaining({
+        status: "sent",
+        patientId: "pat_1"
+      })
+    );
+    expect(context.provider.sentTemplateMessages).toHaveLength(1);
+  });
 });
 
 describe("SchedulingService freed-slot trigger", () => {
@@ -200,6 +245,27 @@ describe("SchedulingService freed-slot trigger", () => {
       ])
     );
   });
+
+  it("ignores freed-slot failure audit errors without failing cancellation", async () => {
+    const audit = new FailingFreedSlotFailureAuditLog();
+    const context = buildSchedulingContext(new FailingFreedSlotHandler(), audit);
+    const appointment = await context.service.bookAppointment({
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      serviceId: "svc_botox",
+      startsAt: new Date("2026-06-05T13:00:00.000Z"),
+      professionalId: "pro_perez"
+    });
+
+    const cancelled = await context.service.cancelAppointment({ clinicId: "clinic_1", appointmentId: appointment.id });
+
+    expect(cancelled.status).toBe("cancelled");
+    expect(await context.calendar.getEvent(appointment.calendarEventId)).toEqual(
+      expect.objectContaining({
+        status: "cancelled"
+      })
+    );
+  });
 });
 
 function buildFreedSlotContext(input: { conversation?: Partial<Conversation> } = {}) {
@@ -236,10 +302,12 @@ function buildFreedSlotContext(input: { conversation?: Partial<Conversation> } =
   return { repos, calendar, provider, audit, templateService, service };
 }
 
-function buildSchedulingContext<T extends FreedSlotHandler = CapturingFreedSlotHandler>(freedSlotHandler?: T) {
+function buildSchedulingContext<T extends FreedSlotHandler = CapturingFreedSlotHandler>(
+  freedSlotHandler?: T,
+  audit = new InMemoryAuditLog()
+) {
   const repos = new InMemoryRepositories();
   const calendar = new FakeCalendar();
-  const audit = new InMemoryAuditLog();
   const handler = freedSlotHandler ?? new CapturingFreedSlotHandler();
   const service = new SchedulingService(
     repos,
@@ -279,6 +347,16 @@ class CapturingFreedSlotHandler implements FreedSlotHandler {
 class FailingFreedSlotHandler implements FreedSlotHandler {
   async handleFreedSlot() {
     throw new Error("kapso unavailable");
+  }
+}
+
+class FailingFreedSlotFailureAuditLog extends InMemoryAuditLog {
+  override record(input: AuditEventInput) {
+    if (input.type === "outbound.freed_slot.failed") {
+      throw new Error("audit unavailable");
+    }
+
+    return super.record(input);
   }
 }
 

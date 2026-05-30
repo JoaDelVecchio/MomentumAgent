@@ -294,16 +294,20 @@ export class SchedulingService {
         slot: appointmentToSlot(appointment)
       });
     } catch (error) {
-      await this.audit.record({
-        clinicId: appointment.clinicId,
-        type: "outbound.freed_slot.failed",
-        message: "Failed freed-slot outbound trigger",
-        metadata: {
-          appointmentId: appointment.id,
-          serviceId: appointment.serviceId,
-          reason: errorMessage(error)
-        }
-      });
+      try {
+        await this.audit.record({
+          clinicId: appointment.clinicId,
+          type: "outbound.freed_slot.failed",
+          message: "Failed freed-slot outbound trigger",
+          metadata: {
+            appointmentId: appointment.id,
+            serviceId: appointment.serviceId,
+            reason: errorMessage(error)
+          }
+        });
+      } catch {
+        // Freed-slot notification failures must not fail the scheduling action.
+      }
     }
   }
 
