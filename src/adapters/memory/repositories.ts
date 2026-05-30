@@ -1,35 +1,15 @@
 import type { Appointment, ClinicProfile, Id, Patient } from "../../domain/types.js";
+import type {
+  Conversation,
+  OperationalRepository,
+  PatientInterest,
+  PendingBooking,
+  ProcessedWebhookDeliveryInput
+} from "../../ports/repositories.js";
 
-export type PendingBooking = {
-  appointmentId?: Id;
-  serviceId: Id;
-  professionalId: Id;
-  startsAt: Date;
-  endsAt: Date;
-};
+export type { Conversation, PatientInterest, PendingBooking };
 
-export type Conversation = {
-  id: Id;
-  clinicId: Id;
-  patientId: Id;
-  botPaused: boolean;
-  pendingBooking?: PendingBooking;
-  createdAt: Date;
-  updatedAt: Date;
-};
-
-export type PatientInterest = {
-  id: Id;
-  clinicId: Id;
-  patientId: Id;
-  serviceId: Id;
-  professionalId?: Id;
-  preferredFrom: Date;
-  preferredTo: Date;
-  status: "active" | "fulfilled" | "expired";
-};
-
-export class InMemoryRepositories {
+export class InMemoryRepositories implements OperationalRepository {
   private clinicProfiles = new Map<Id, ClinicProfile>();
   private patients = new Map<Id, Patient>();
   private conversations = new Map<Id, Conversation>();
@@ -127,12 +107,19 @@ export class InMemoryRepositories {
   }
 
   hasProcessedWebhookDelivery(idempotencyKey: string) {
-    return this.processedWebhookDeliveries.has(idempotencyKey);
+    return (
+      this.processedWebhookDeliveries.has(idempotencyKey) ||
+      this.processedWebhookDeliveries.has(`kapso:${idempotencyKey}`)
+    );
   }
 
-  markProcessedWebhookDelivery(idempotencyKey: string) {
-    this.processedWebhookDeliveries.add(idempotencyKey);
+  markProcessedWebhookDelivery(input: string | ProcessedWebhookDeliveryInput) {
+    this.processedWebhookDeliveries.add(deliveryKey(input));
   }
+}
+
+function deliveryKey(input: string | ProcessedWebhookDeliveryInput) {
+  return typeof input === "string" ? input : `${input.provider}:${input.idempotencyKey}`;
 }
 
 function cloneClinicProfile(profile: ClinicProfile): ClinicProfile {

@@ -1,8 +1,8 @@
-import type { InMemoryRepositories } from "../../adapters/memory/repositories.js";
 import { DomainError } from "../../domain/errors.js";
 import type { Appointment, ClinicProfile } from "../../domain/types.js";
 import type { AuditLogPort } from "../../ports/audit-log.js";
 import { CalendarAvailabilityError, type CalendarPort, type CalendarSlot } from "../../ports/calendar.js";
+import type { OperationalRepository } from "../../ports/repositories.js";
 
 type BookAppointmentInput = {
   clinicId: string;
@@ -15,7 +15,7 @@ type BookAppointmentInput = {
 
 export class SchedulingService {
   constructor(
-    private readonly repos: InMemoryRepositories,
+    private readonly repos: OperationalRepository,
     private readonly calendar: CalendarPort,
     private readonly audit: AuditLogPort,
     private readonly now: () => Date = () => new Date()
@@ -28,7 +28,7 @@ export class SchedulingService {
     to: Date;
     professionalId?: string;
   }): Promise<CalendarSlot[]> {
-    const profile = this.requireProfile(input.clinicId);
+    const profile = await this.requireProfile(input.clinicId);
     const service = profile.services.find((candidate) => candidate.id === input.serviceId);
     if (!service) {
       throw new DomainError(`Service ${input.serviceId} not found`);
@@ -51,7 +51,7 @@ export class SchedulingService {
   }
 
   async bookAppointment(input: BookAppointmentInput): Promise<Appointment> {
-    const profile = this.requireProfile(input.clinicId);
+    const profile = await this.requireProfile(input.clinicId);
     const service = profile.services.find((candidate) => candidate.id === input.serviceId);
     if (!service) {
       throw new DomainError(`Service ${input.serviceId} not found`);
@@ -80,14 +80,17 @@ export class SchedulingService {
       throw new DomainError("Selected slot is no longer available");
     }
 
-    const appointmentId = this.repos.nextAppointmentId();
-    const event = await this.createCalendarEvent({
-      calendarId: professional.calendarId,
-      summary: `${service.name} - ${input.patientId}`,
-      startsAt,
-      endsAt: calendarEndsAt,
-      metadata: { appointmentId, patientId: input.patientId, serviceId: input.serviceId }
-    }, "Selected slot is no longer available");
+    const appointmentId = await this.repos.nextAppointmentId();
+    const event = await this.createCalendarEvent(
+      {
+        calendarId: professional.calendarId,
+        summary: `${service.name} - ${input.patientId}`,
+        startsAt,
+        endsAt: calendarEndsAt,
+        metadata: { appointmentId, patientId: input.patientId, serviceId: input.serviceId }
+      },
+      "Selected slot is no longer available"
+    );
 
     const appointment: Appointment = {
       id: appointmentId,
@@ -102,7 +105,7 @@ export class SchedulingService {
       status: "scheduled"
     };
 
-    this.repos.saveAppointment(appointment);
+    await this.repos.saveAppointment(appointment);
     await this.audit.record({
       clinicId: input.clinicId,
       conversationId: input.conversationId,
@@ -116,19 +119,19 @@ export class SchedulingService {
 
   async cancelAppointment(input: { clinicId: string; appointmentId: string; conversationId?: string }) {
     return this.repos.withAppointmentLock(input.appointmentId, async () => {
-      const appointment = this.repos.getAppointment(input.appointmentId);
+      const appointment = await this.repos.getAppointment(input.appointmentId);
       if (!appointment) {
         throw new DomainError(`Appointment ${input.appointmentId} not found`);
       }
       this.assertClinicOwnership(appointment, input.clinicId);
-      const profile = this.requireProfile(input.clinicId);
+      const profile = await this.requireProfile(input.clinicId);
       const cancellationNoticeMs = profile.appointmentRules.cancellationNoticeMinutes * 60000;
       if (appointment.startsAt.getTime() - this.now().getTime() < cancellationNoticeMs) {
         throw new DomainError(`Appointment ${appointment.id} cannot be cancelled inside the notice window`);
       }
       await this.calendar.cancelEvent(appointment.calendarEventId, appointment.calendarId);
       const cancelled: Appointment = { ...appointment, status: "cancelled" };
-      this.repos.saveAppointment(cancelled);
+      await this.repos.saveAppointment(cancelled);
       await this.audit.record({
         clinicId: input.clinicId,
         conversationId: input.conversationId,
@@ -147,7 +150,7 @@ export class SchedulingService {
     conversationId?: string;
   }): Promise<Appointment> {
     return this.repos.withAppointmentLock(input.appointmentId, async () => {
-      const appointment = this.repos.getAppointment(input.appointmentId);
+      const appointment = await this.repos.getAppointment(input.appointmentId);
       if (!appointment) {
         throw new DomainError(`Appointment ${input.appointmentId} not found`);
       }
@@ -156,7 +159,7 @@ export class SchedulingService {
         throw new DomainError(`Appointment ${appointment.id} is cancelled`);
       }
 
-      const profile = this.requireProfile(input.clinicId);
+      const profile = await this.requireProfile(input.clinicId);
       const service = profile.services.find((candidate) => candidate.id === appointment.serviceId);
       const professional = profile.professionals.find((candidate) => candidate.id === appointment.professionalId);
       if (!service || !professional) {
@@ -191,20 +194,24 @@ export class SchedulingService {
         throw new DomainError("Selected reschedule slot is no longer available");
       }
 
-      await this.updateCalendarEvent(appointment.calendarEventId, {
-        calendarId: eventCalendarId,
-        summary: `${service.name} - ${appointment.patientId}`,
-        startsAt,
-        endsAt: calendarEndsAt,
-        metadata: {
-          appointmentId: appointment.id,
-          patientId: appointment.patientId,
-          serviceId: appointment.serviceId
-        }
-      }, "Selected reschedule slot is no longer available");
+      await this.updateCalendarEvent(
+        appointment.calendarEventId,
+        {
+          calendarId: eventCalendarId,
+          summary: `${service.name} - ${appointment.patientId}`,
+          startsAt,
+          endsAt: calendarEndsAt,
+          metadata: {
+            appointmentId: appointment.id,
+            patientId: appointment.patientId,
+            serviceId: appointment.serviceId
+          }
+        },
+        "Selected reschedule slot is no longer available"
+      );
 
       const updated: Appointment = { ...appointment, startsAt, endsAt };
-      this.repos.saveAppointment(updated);
+      await this.repos.saveAppointment(updated);
       await this.audit.record({
         clinicId: input.clinicId,
         conversationId: input.conversationId,
@@ -217,8 +224,8 @@ export class SchedulingService {
     });
   }
 
-  private requireProfile(clinicId: string) {
-    const profile = this.repos.getClinicProfile(clinicId);
+  private async requireProfile(clinicId: string) {
+    const profile = await this.repos.getClinicProfile(clinicId);
     if (!profile) {
       throw new DomainError(`Clinic ${clinicId} not configured`);
     }

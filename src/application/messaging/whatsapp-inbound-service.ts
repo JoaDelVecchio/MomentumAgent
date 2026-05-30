@@ -1,7 +1,7 @@
-import type { InMemoryRepositories } from "../../adapters/memory/repositories.js";
-import type { WorkflowResult } from "../conversations/conversation-workflow.js";
 import type { AuditLogPort } from "../../ports/audit-log.js";
 import type { NormalizedWhatsAppInboundMessage, WhatsAppProvider } from "../../ports/messaging.js";
+import type { OperationalRepository } from "../../ports/repositories.js";
+import type { WorkflowResult } from "../conversations/conversation-workflow.js";
 
 type ConversationWorkflowPort = {
   handleInboundMessage(input: {
@@ -14,7 +14,7 @@ type ConversationWorkflowPort = {
 };
 
 export type WhatsAppInboundServiceOptions = {
-  repos: InMemoryRepositories;
+  repos: OperationalRepository;
   provider: WhatsAppProvider;
   workflow: ConversationWorkflowPort;
   audit: AuditLogPort;
@@ -29,16 +29,16 @@ export class WhatsAppInboundService {
   constructor(private readonly options: WhatsAppInboundServiceOptions) {}
 
   async handleInboundMessage(message: NormalizedWhatsAppInboundMessage): Promise<WhatsAppInboundResult> {
-    if (this.options.repos.hasProcessedWebhookDelivery(message.idempotencyKey)) {
+    if (await this.options.repos.hasProcessedWebhookDelivery(message.idempotencyKey)) {
       await this.auditDuplicate(message);
       return { status: "ignored_duplicate" };
     }
 
     await this.auditInboundAccepted(message);
 
-    const existingConversation = this.options.repos.getConversation(message.conversationId);
+    const existingConversation = await this.options.repos.getConversation(message.conversationId);
     if (existingConversation?.botPaused) {
-      this.options.repos.markProcessedWebhookDelivery(message.idempotencyKey);
+      await this.options.repos.markProcessedWebhookDelivery(message.idempotencyKey);
       await this.auditBotPaused(message);
       return { status: "bot_paused" };
     }
@@ -58,7 +58,7 @@ export class WhatsAppInboundService {
         text: workflowResult.text
       });
 
-      this.options.repos.markProcessedWebhookDelivery(message.idempotencyKey);
+      await this.options.repos.markProcessedWebhookDelivery(message.idempotencyKey);
       await this.auditOutboundSent(message, workflowResult, sendResult.providerMessageId);
 
       return {
