@@ -18,8 +18,6 @@ import {
 import { createPrismaTestContext, type PrismaTestContext } from "./helpers/prisma.js";
 
 const googleCalendarScope = "https://www.googleapis.com/auth/calendar.events";
-const googleCalendarFreeBusyScope = "https://www.googleapis.com/auth/calendar.events.freebusy";
-
 describe("InMemoryCalendarCredentialRepository", () => {
   it("saves and reads a Google refresh token by clinicId", async () => {
     const repository = new InMemoryCalendarCredentialRepository();
@@ -221,7 +219,7 @@ describe("Google Calendar OAuth routes", () => {
     expect(redirectUrl.searchParams.get("access_type")).toBe("offline");
     expect(redirectUrl.searchParams.get("prompt")).toBe("consent");
     expect(redirectUrl.searchParams.get("scope")?.split(" ").sort()).toEqual(
-      [googleCalendarScope, googleCalendarFreeBusyScope].sort()
+      [...GOOGLE_CALENDAR_SCOPES].sort()
     );
     expect(state).toEqual(expect.any(String));
   });
@@ -249,7 +247,7 @@ describe("Google Calendar OAuth routes", () => {
       access_token: "google_access_token_from_callback",
       refresh_token: "google_refresh_token_from_callback",
       expiry_date: Date.parse("2026-06-01T12:00:00.000Z"),
-      scope: `${googleCalendarScope} ${googleCalendarFreeBusyScope}`
+      scope: GOOGLE_CALENDAR_SCOPES.join(" ")
     });
     const repository = new InMemoryCalendarCredentialRepository();
     const service = new GoogleOAuthService(config, repository, () => oauthClient);
@@ -285,7 +283,7 @@ describe("Google Calendar OAuth routes", () => {
       accessToken: "google_access_token_from_callback",
       refreshToken: "google_refresh_token_from_callback",
       expiryDate: new Date("2026-06-01T12:00:00.000Z"),
-      scopes: [googleCalendarScope, googleCalendarFreeBusyScope]
+      scopes: [...GOOGLE_CALENDAR_SCOPES]
     });
     expect(credentials?.providerAccountEmail).toBeUndefined();
   });
@@ -325,7 +323,7 @@ describe("Google Calendar OAuth routes", () => {
     const oauthClient = new FakeGoogleOAuthClient(config, {
       access_token: "new_google_access_token",
       expiry_date: Date.parse("2026-06-01T14:00:00.000Z"),
-      scope: `${googleCalendarScope} ${googleCalendarFreeBusyScope}`
+      scope: GOOGLE_CALENDAR_SCOPES.join(" ")
     });
     const repository = new InMemoryCalendarCredentialRepository();
     const service = new GoogleOAuthService(config, repository, () => oauthClient);
@@ -337,7 +335,7 @@ describe("Google Calendar OAuth routes", () => {
     await repository.save({
       clinicId,
       provider: "google",
-      scopes: [googleCalendarScope, googleCalendarFreeBusyScope],
+      scopes: [...GOOGLE_CALENDAR_SCOPES],
       accessToken: "old_google_access_token",
       refreshToken: "existing_google_refresh_token",
       expiryDate: new Date("2026-06-01T12:00:00.000Z")
