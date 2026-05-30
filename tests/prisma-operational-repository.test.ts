@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { PrismaAuditLog } from "../src/adapters/prisma/audit-log.js";
 import { createPrismaTestContext, type PrismaTestContext } from "./helpers/prisma.js";
 
 describe("Prisma operational persistence schema", () => {
@@ -47,5 +48,52 @@ describe("Prisma operational persistence schema", () => {
         }
       })
     ).rejects.toThrow();
+  });
+});
+
+describe("PrismaAuditLog", () => {
+  let context: PrismaTestContext;
+  let prisma: PrismaClient;
+
+  beforeAll(async () => {
+    context = createPrismaTestContext("momentum-prisma-audit-");
+    prisma = context.prisma;
+    await prisma.clinic.create({
+      data: {
+        id: "clinic_audit",
+        name: "Audit Clinic",
+        timezone: "America/Argentina/Buenos_Aires",
+        minimumNoticeMinutes: 0,
+        cancellationNoticeMinutes: 1440,
+        bufferMinutes: 0,
+        requiredPatientFieldsJson: JSON.stringify(["fullName"])
+      }
+    });
+  });
+
+  afterAll(async () => {
+    await context.cleanup();
+  });
+
+  it("records audit events and parses metadata on return", async () => {
+    const audit = new PrismaAuditLog(prisma);
+
+    const event = await audit.record({
+      clinicId: "clinic_audit",
+      type: "whatsapp.inbound.accepted",
+      message: "Accepted WhatsApp inbound delivery",
+      metadata: { idempotencyKey: "delivery_1", provider: "kapso" }
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        id: expect.any(String),
+        clinicId: "clinic_audit",
+        type: "whatsapp.inbound.accepted",
+        message: "Accepted WhatsApp inbound delivery",
+        metadata: { idempotencyKey: "delivery_1", provider: "kapso" },
+        createdAt: expect.any(Date)
+      })
+    );
   });
 });
