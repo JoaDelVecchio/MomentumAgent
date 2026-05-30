@@ -492,6 +492,101 @@ describe("ConversationWorkflow with AI understanding", () => {
     expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
   });
 
+  it("uses high-confidence OpenAI patientFullName while waiting for a full name", async () => {
+    const { calendar, repos, workflow } = buildContext(
+      new FakeInterpreter(
+        understanding({
+          intent: "unknown",
+          confidence: 0.91,
+          patientFullName: "Ana Gomez"
+        })
+      )
+    );
+    const startsAt = new Date("2026-06-01T13:00:00.000Z");
+    const endsAt = new Date("2026-06-01T13:30:00.000Z");
+    calendar.seedAvailability("cal_perez", [{ startsAt, endsAt }]);
+    repos.saveConversation({
+      id: "conv_1",
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      botPaused: false,
+      pendingBooking: {
+        serviceId: "svc_botox",
+        professionalId: "pro_perez",
+        startsAt,
+        endsAt
+      },
+      createdAt: new Date("2026-05-29T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-29T12:00:00.000Z")
+    });
+
+    const result = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Mi nombre es Ana Gomez"
+    });
+
+    expect(result).toEqual({
+      kind: "reply",
+      text: "Turno confirmado para 2026-06-01T13:00:00.000Z. Te vamos a enviar el recordatorio antes del turno."
+    });
+    expect(repos.getPatient("pat_1")?.fullName).toBe("Ana Gomez");
+    expect(repos.listAppointmentsByPatient("pat_1")).toEqual([
+      expect.objectContaining({
+        patientId: "pat_1",
+        serviceId: "svc_botox",
+        startsAt,
+        status: "scheduled"
+      })
+    ]);
+  });
+
+  it("does not use low-confidence OpenAI patientFullName while waiting for a full name", async () => {
+    const { calendar, repos, workflow } = buildContext(
+      new FakeInterpreter(
+        understanding({
+          intent: "unknown",
+          confidence: 0.1,
+          patientFullName: "Ana Gomez"
+        })
+      )
+    );
+    const startsAt = new Date("2026-06-01T13:00:00.000Z");
+    const endsAt = new Date("2026-06-01T13:30:00.000Z");
+    calendar.seedAvailability("cal_perez", [{ startsAt, endsAt }]);
+    repos.saveConversation({
+      id: "conv_1",
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      botPaused: false,
+      pendingBooking: {
+        serviceId: "svc_botox",
+        professionalId: "pro_perez",
+        startsAt,
+        endsAt
+      },
+      createdAt: new Date("2026-05-29T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-29T12:00:00.000Z")
+    });
+
+    const result = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Mi nombre es Ana Gomez"
+    });
+
+    expect(result).toEqual({
+      kind: "reply",
+      text: "Te ayudo con informacion y turnos. Decime que tratamiento te interesa o si queres reservar, cancelar o cambiar un turno."
+    });
+    expect(repos.getPatient("pat_1")?.fullName).toBeUndefined();
+    expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
+  });
+
   it("does not offer a slot from a low-confidence booking intent with a service", async () => {
     const { calendar, repos, workflow } = buildContext(
       new FakeInterpreter(

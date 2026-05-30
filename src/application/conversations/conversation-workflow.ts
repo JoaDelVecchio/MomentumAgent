@@ -311,11 +311,8 @@ export class ConversationWorkflow {
       return undefined;
     }
 
-    if (!canTreatMessageAsPatientData(input.text, intent)) {
-      return undefined;
-    }
-
-    if (!looksLikeFullName(input.text)) {
+    const fullName = extractPendingPatientFullName(input.text, intent);
+    if (!fullName) {
       return undefined;
     }
 
@@ -323,7 +320,7 @@ export class ConversationWorkflow {
     await this.repos.upsertPatient({
       id: input.patientId,
       whatsappNumber: input.whatsappNumber,
-      fullName: normalizeFullName(input.text) ?? patient?.fullName
+      fullName: fullName ?? patient?.fullName
     });
 
     return await this.handleConfirmation(input, conversation);
@@ -419,14 +416,27 @@ function looksLikeFullName(text: string) {
   return normalized ? normalized.split(" ").length >= 2 : false;
 }
 
-function canTreatMessageAsPatientData(text: string, intent: ConversationUnderstanding) {
-  return (
-    intent.provider !== "fallback" &&
-    intent.intent === "question" &&
-    !intent.requiresHuman &&
-    !hasMedicalSafetyLanguage(text) &&
-    !hasOperationalActionLanguage(text)
-  );
+function extractPendingPatientFullName(text: string, intent: ConversationUnderstanding) {
+  if (intent.requiresHuman || hasMedicalSafetyLanguage(text) || hasOperationalActionLanguage(text)) {
+    return undefined;
+  }
+
+  if (intent.provider === "fallback") {
+    return undefined;
+  }
+
+  if (intent.provider === "openai") {
+    if (intent.confidence < SIDE_EFFECT_CONFIDENCE_THRESHOLD) {
+      return undefined;
+    }
+    return normalizeFullName(intent.patientFullName ?? "");
+  }
+
+  if (intent.intent === "question") {
+    return normalizeFullName(text);
+  }
+
+  return undefined;
 }
 
 function isLowConfidenceSideEffectIntent(intent: ConversationUnderstanding) {
