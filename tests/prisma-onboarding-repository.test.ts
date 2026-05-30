@@ -67,11 +67,29 @@ describe("PrismaOnboardingRepository", () => {
         updatedAt: new Date("2026-06-02T13:00:00.000Z")
       })
     );
+    await expect(repo.getClinicSetup("clinic_converted_before_setup")).resolves.toEqual(
+      expect.objectContaining({
+        clinicId: "clinic_converted_before_setup",
+        leadId: first.id
+      })
+    );
+    await repo.upsertClinicSetup({
+      ...setupInput("clinic_converted_before_setup", "2026-06-03T12:00:00.000Z"),
+      primaryContactName: "Ana Owner"
+    });
+    await expect(repo.getClinicSetup("clinic_converted_before_setup")).resolves.toEqual(
+      expect.objectContaining({
+        clinicId: "clinic_converted_before_setup",
+        leadId: first.id,
+        primaryContactName: "Ana Owner"
+      })
+    );
     await expect(
       prisma.clinic.findUnique({
         where: { id: "clinic_converted_before_setup" },
         select: {
           id: true,
+          leadId: true,
           name: true,
           timezone: true,
           requiredPatientFieldsJson: true,
@@ -81,6 +99,7 @@ describe("PrismaOnboardingRepository", () => {
       })
     ).resolves.toEqual({
       id: "clinic_converted_before_setup",
+      leadId: first.id,
       name: "clinic_converted_before_setup",
       timezone: "America/Argentina/Buenos_Aires",
       requiredPatientFieldsJson: JSON.stringify(["fullName"]),

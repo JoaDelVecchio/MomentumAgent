@@ -114,12 +114,26 @@ export class PrismaOnboardingRepository implements OnboardingRepository {
 
   async markLeadConverted(input: { leadId: Id; clinicId: Id; updatedAt: Date }): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
+      const lead = await tx.clinicLead.findUnique({
+        where: { id: input.leadId },
+        select: { id: true }
+      });
+      if (!lead) {
+        throw new Error(`Clinic lead ${input.leadId} not found`);
+      }
       await ensureMinimalClinic(tx, input.clinicId);
       await tx.clinicLead.update({
         where: { id: input.leadId },
         data: {
           status: "converted",
           convertedClinicId: input.clinicId,
+          updatedAt: input.updatedAt
+        }
+      });
+      await tx.clinic.update({
+        where: { id: input.clinicId },
+        data: {
+          leadId: input.leadId,
           updatedAt: input.updatedAt
         }
       });
@@ -148,7 +162,7 @@ export class PrismaOnboardingRepository implements OnboardingRepository {
         updatedAt: input.updatedAt
       },
       update: {
-        leadId: input.leadId ?? null,
+        ...(input.leadId === undefined ? {} : { leadId: input.leadId }),
         source: input.source,
         lifecycleState: input.lifecycleState,
         paymentStatus: input.paymentStatus,

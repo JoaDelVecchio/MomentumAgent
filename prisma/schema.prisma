@@ -16,6 +16,7 @@ model Clinic {
   bufferMinutes             Int
   requiredPatientFieldsJson String
   leadId                    String?
+  lead                      ClinicLead?           @relation("ClinicSetupLead", fields: [leadId], references: [id], onDelete: SetNull)
   source                    String                @default("presencial")
   lifecycleState            String                @default("setup")
   paymentStatus             String                @default("unpaid")
@@ -41,7 +42,7 @@ model Clinic {
   processedWebhookDeliveries ProcessedWebhookDelivery[]
   outboundDeliveries        OutboundDelivery[]
   knowledgeRecords          ClinicKnowledge[]
-  convertedLeads            ClinicLead[]
+  convertedLeads            ClinicLead[]          @relation("ConvertedClinic")
 
   @@index([lifecycleState, paymentStatus, updatedAt])
   @@index([source, updatedAt])
@@ -65,7 +66,8 @@ model ClinicLead {
   submittedAt              DateTime
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
-  convertedClinic          Clinic?  @relation(fields: [convertedClinicId], references: [id], onDelete: SetNull)
+  convertedClinic          Clinic?  @relation("ConvertedClinic", fields: [convertedClinicId], references: [id], onDelete: SetNull)
+  setupClinics             Clinic[] @relation("ClinicSetupLead")
 
   @@index([submittedAt])
   @@index([status, submittedAt])

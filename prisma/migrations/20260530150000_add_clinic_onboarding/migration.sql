@@ -1,5 +1,4 @@
 ALTER TABLE "Clinic" ADD COLUMN "source" TEXT NOT NULL DEFAULT 'presencial';
-ALTER TABLE "Clinic" ADD COLUMN "leadId" TEXT;
 ALTER TABLE "Clinic" ADD COLUMN "lifecycleState" TEXT NOT NULL DEFAULT 'setup';
 ALTER TABLE "Clinic" ADD COLUMN "paymentStatus" TEXT NOT NULL DEFAULT 'unpaid';
 ALTER TABLE "Clinic" ADD COLUMN "primaryContactName" TEXT NOT NULL DEFAULT '';
@@ -30,6 +29,8 @@ CREATE TABLE "ClinicLead" (
   "updatedAt" DATETIME NOT NULL,
   CONSTRAINT "ClinicLead_convertedClinicId_fkey" FOREIGN KEY ("convertedClinicId") REFERENCES "Clinic" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
+
+ALTER TABLE "Clinic" ADD COLUMN "leadId" TEXT REFERENCES "ClinicLead" ("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 CREATE TABLE "ClinicKnowledge" (
   "id" TEXT NOT NULL PRIMARY KEY,
