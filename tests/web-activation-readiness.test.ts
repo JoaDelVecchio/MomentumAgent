@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { profileChecklistState } from "../apps/web/src/app/internal/onboarding/clinics/[clinicId]/activation/page.js";
+import { profileChecklistState } from "../apps/web/src/lib/activation-readiness.js";
 
 describe("activation profile readiness display", () => {
   it("treats clinic profile as complete when activation missing keys omit it", () => {

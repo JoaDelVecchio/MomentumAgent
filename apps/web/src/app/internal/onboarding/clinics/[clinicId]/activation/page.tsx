@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
+import { profileChecklistState, type ChecklistState } from "../../../../../../lib/activation-readiness";
 import { apiBaseUrl, apiJson, adminHeaders } from "../../../../../../lib/api";
 import type {
   ActivationErrorResponse,
@@ -10,8 +11,6 @@ import type {
   ClinicSetupRecord,
   ClinicSetupResponse
 } from "../../../../../../lib/types";
-
-type ChecklistState = boolean | "unknown";
 
 const setupReadinessItems: Array<{ key: ClinicReadinessKey; label: string; getValue: (setup: ClinicSetupRecord) => boolean }> = [
   { key: "payment", label: "Payment eligible", getValue: (setup) => ["paid", "trial", "waived"].includes(setup.paymentStatus) },
@@ -204,20 +203,6 @@ async function postLifecycle(path: string, token: string): Promise<ClinicSetupRe
 
 function isActivationError(error: unknown): error is ActivationErrorResponse {
   return Boolean(error && typeof error === "object" && "error" in error);
-}
-
-export function profileChecklistState(input: {
-  activationAttempted: boolean;
-  activationSucceeded: boolean;
-  missing: ClinicReadinessKey[];
-}): ChecklistState {
-  if (input.activationSucceeded) {
-    return true;
-  }
-  if (!input.activationAttempted) {
-    return "unknown";
-  }
-  return !input.missing.includes("clinic_profile");
 }
 
 function indicatorClass(state: ChecklistState): string {
