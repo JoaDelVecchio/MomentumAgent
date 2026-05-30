@@ -4,10 +4,14 @@ import type { PrismaClient } from "@prisma/client";
 import type { Appointment, ClinicProfile, Id, Patient } from "../../domain/types.js";
 import type {
   Conversation,
+  ConversationLookup,
   OperationalRepository,
   PatientInterest,
   PendingBooking,
-  ProcessedWebhookDeliveryInput
+  ProcessedWebhookDeliveryInput,
+  WebhookDeliveryClaim,
+  WebhookDeliveryOutcomeInput,
+  WebhookDeliveryRecord
 } from "../../ports/repositories.js";
 
 type PatientRecord = { id: string; whatsappNumber: string; fullName: string | null };
@@ -33,6 +37,18 @@ type ConversationRecord = {
   pendingBookingJson: string | null;
   createdAt: Date;
   updatedAt: Date;
+};
+
+type WebhookDeliveryPrismaRecord = {
+  provider: string;
+  idempotencyKey: string;
+  clinicId: string;
+  conversationId: string | null;
+  providerMessageId: string | null;
+  outboundProviderMessageId: string | null;
+  status: string;
+  responseText: string | null;
+  workflowResult: string | null;
 };
 
 type PatientInterestRecord = {
@@ -148,7 +164,7 @@ export class PrismaOperationalRepository implements OperationalRepository {
 
   async saveConversation(conversation: Conversation): Promise<void> {
     await this.prisma.conversation.upsert({
-      where: { id: conversation.id },
+      where: { clinicId_id: { clinicId: conversation.clinicId, id: conversation.id } },
       create: {
         id: conversation.id,
         clinicId: conversation.clinicId,
@@ -168,8 +184,10 @@ export class PrismaOperationalRepository implements OperationalRepository {
     });
   }
 
-  async getConversation(conversationId: Id): Promise<Conversation | undefined> {
-    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+  async getConversation(lookup: ConversationLookup): Promise<Conversation | undefined> {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { clinicId_id: { clinicId: lookup.clinicId, id: lookup.conversationId } }
+    });
     return conversation ? toConversation(conversation) : undefined;
   }
 
@@ -267,13 +285,24 @@ export class PrismaOperationalRepository implements OperationalRepository {
   }
 
   async markOptOut(whatsappNumber: string): Promise<void> {
-    await this.prisma.patient.updateMany({
-      where: { whatsappNumber },
-      data: { optedOut: true }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.whatsAppOptOut.upsert({
+        where: { whatsappNumber },
+        create: { whatsappNumber },
+        update: {}
+      });
+      await tx.patient.updateMany({
+        where: { whatsappNumber },
+        data: { optedOut: true }
+      });
     });
   }
 
   async isOptedOut(whatsappNumber: string): Promise<boolean> {
+    const optOut = await this.prisma.whatsAppOptOut.findUnique({ where: { whatsappNumber } });
+    if (optOut) {
+      return true;
+    }
     const patient = await this.prisma.patient.findUnique({
       where: { whatsappNumber },
       select: { optedOut: true }
@@ -281,11 +310,130 @@ export class PrismaOperationalRepository implements OperationalRepository {
     return patient?.optedOut ?? false;
   }
 
-  async hasProcessedWebhookDelivery(idempotencyKey: string): Promise<boolean> {
+  async claimWebhookDelivery(input: ProcessedWebhookDeliveryInput): Promise<WebhookDeliveryClaim> {
+    try {
+      const delivery = await this.prisma.processedWebhookDelivery.create({
+        data: {
+          provider: input.provider,
+          idempotencyKey: input.idempotencyKey,
+          clinicId: input.clinicId,
+          conversationId: input.conversationId,
+          providerMessageId: input.providerMessageId,
+          status: "processing"
+        }
+      });
+      return { kind: "new", delivery: toWebhookDelivery(delivery) };
+    } catch (error) {
+      if (!isPrismaUniqueConflict(error)) {
+        throw error;
+      }
+      const delivery = await this.prisma.processedWebhookDelivery.findUnique({
+        where: { provider_idempotencyKey: { provider: input.provider, idempotencyKey: input.idempotencyKey } }
+      });
+      if (!delivery) {
+        throw error;
+      }
+
+      if (delivery.status === "response_ready" && delivery.responseText && delivery.workflowResult) {
+        const claim = await this.prisma.processedWebhookDelivery.updateMany({
+          where: {
+            provider: input.provider,
+            idempotencyKey: input.idempotencyKey,
+            status: "response_ready"
+          },
+          data: {
+            clinicId: input.clinicId,
+            conversationId: input.conversationId,
+            providerMessageId: input.providerMessageId,
+            status: "processing",
+            processedAt: new Date()
+          }
+        });
+
+        if (claim.count === 1) {
+          const claimed = await this.prisma.processedWebhookDelivery.findUnique({
+            where: { provider_idempotencyKey: { provider: input.provider, idempotencyKey: input.idempotencyKey } }
+          });
+          if (claimed) {
+            return { kind: "retry", delivery: toWebhookDelivery(claimed) };
+          }
+        }
+
+        const current = await this.prisma.processedWebhookDelivery.findUnique({
+          where: { provider_idempotencyKey: { provider: input.provider, idempotencyKey: input.idempotencyKey } }
+        });
+        if (current) {
+          return { kind: "existing", delivery: toWebhookDelivery(current) };
+        }
+      }
+      return { kind: "existing", delivery: toWebhookDelivery(delivery) };
+    }
+  }
+
+  async releaseWebhookDeliveryClaim(input: ProcessedWebhookDeliveryInput): Promise<void> {
+    await this.prisma.processedWebhookDelivery.deleteMany({
+      where: {
+        provider: input.provider,
+        idempotencyKey: input.idempotencyKey,
+        status: "processing",
+        responseText: null,
+        workflowResult: null
+      }
+    });
+  }
+
+  async getWebhookDelivery(idempotencyKey: string): Promise<WebhookDeliveryRecord | undefined> {
     const delivery = await this.prisma.processedWebhookDelivery.findUnique({
       where: { provider_idempotencyKey: { provider: "kapso", idempotencyKey } }
     });
-    return delivery !== null;
+    return delivery ? toWebhookDelivery(delivery) : undefined;
+  }
+
+  async saveWebhookDeliveryOutcome(input: WebhookDeliveryOutcomeInput): Promise<void> {
+    await this.prisma.processedWebhookDelivery.upsert({
+      where: { provider_idempotencyKey: { provider: input.provider, idempotencyKey: input.idempotencyKey } },
+      create: {
+        provider: input.provider,
+        idempotencyKey: input.idempotencyKey,
+        clinicId: input.clinicId,
+        conversationId: input.conversationId,
+        providerMessageId: input.providerMessageId,
+        status: "processing",
+        responseText: input.responseText,
+        workflowResult: input.workflowResult,
+        processedAt: new Date()
+      },
+      update: {
+        clinicId: input.clinicId,
+        conversationId: input.conversationId,
+        providerMessageId: input.providerMessageId,
+        status: "processing",
+        responseText: input.responseText,
+        workflowResult: input.workflowResult,
+        processedAt: new Date()
+      }
+    });
+  }
+
+  async markWebhookDeliveryReadyForRetry(input: ProcessedWebhookDeliveryInput): Promise<void> {
+    await this.prisma.processedWebhookDelivery.update({
+      where: { provider_idempotencyKey: { provider: input.provider, idempotencyKey: input.idempotencyKey } },
+      data: {
+        clinicId: input.clinicId,
+        conversationId: input.conversationId,
+        providerMessageId: input.providerMessageId,
+        status: "response_ready",
+        processedAt: new Date()
+      }
+    });
+  }
+
+  async hasProcessedWebhookDelivery(idempotencyKey: string): Promise<boolean> {
+    const delivery = await this.prisma.processedWebhookDelivery.findUnique({
+      where: { provider_idempotencyKey: { provider: "kapso", idempotencyKey } },
+      select: { status: true }
+    });
+    return delivery?.status === "processed";
   }
 
   async markProcessedWebhookDelivery(input: string | ProcessedWebhookDeliveryInput): Promise<void> {
@@ -295,7 +443,18 @@ export class PrismaOperationalRepository implements OperationalRepository {
         : input;
 
     try {
-      await this.prisma.processedWebhookDelivery.create({ data: delivery });
+      await this.prisma.processedWebhookDelivery.upsert({
+        where: { provider_idempotencyKey: { provider: delivery.provider, idempotencyKey: delivery.idempotencyKey } },
+        create: { ...delivery, status: "processed", processedAt: new Date() },
+        update: {
+          clinicId: delivery.clinicId,
+          conversationId: delivery.conversationId,
+          providerMessageId: delivery.providerMessageId,
+          outboundProviderMessageId: delivery.outboundProviderMessageId,
+          status: "processed",
+          processedAt: new Date()
+        }
+      });
     } catch (error) {
       if (isPrismaUniqueConflict(error)) return;
       throw error;
@@ -457,6 +616,20 @@ function toPatientInterest(record: PatientInterestRecord): PatientInterest {
   };
 }
 
+function toWebhookDelivery(record: WebhookDeliveryPrismaRecord): WebhookDeliveryRecord {
+  return {
+    provider: "kapso",
+    idempotencyKey: record.idempotencyKey,
+    clinicId: record.clinicId,
+    ...(record.conversationId ? { conversationId: record.conversationId } : {}),
+    ...(record.providerMessageId ? { providerMessageId: record.providerMessageId } : {}),
+    ...(record.outboundProviderMessageId ? { outboundProviderMessageId: record.outboundProviderMessageId } : {}),
+    status: toWebhookDeliveryStatus(record.status),
+    ...(record.responseText ? { responseText: record.responseText } : {}),
+    ...(record.workflowResult ? { workflowResult: toWebhookDeliveryWorkflowResult(record.workflowResult) } : {})
+  };
+}
+
 function toAppointmentStatus(status: string): Appointment["status"] {
   if (status === "scheduled" || status === "cancelled") return status;
   throw new Error(`Unknown appointment status: ${status}`);
@@ -465,6 +638,16 @@ function toAppointmentStatus(status: string): Appointment["status"] {
 function toInterestStatus(status: string): PatientInterest["status"] {
   if (status === "active" || status === "fulfilled" || status === "expired") return status;
   throw new Error(`Unknown patient interest status: ${status}`);
+}
+
+function toWebhookDeliveryStatus(status: string): WebhookDeliveryRecord["status"] {
+  if (status === "processing" || status === "response_ready" || status === "processed") return status;
+  throw new Error(`Unknown webhook delivery status: ${status}`);
+}
+
+function toWebhookDeliveryWorkflowResult(workflowResult: string): NonNullable<WebhookDeliveryRecord["workflowResult"]> {
+  if (workflowResult === "reply" || workflowResult === "handoff") return workflowResult;
+  throw new Error(`Unknown webhook delivery workflow result: ${workflowResult}`);
 }
 
 function isPrismaUniqueConflict(error: unknown): boolean {

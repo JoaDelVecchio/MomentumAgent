@@ -5,7 +5,12 @@ import { InMemoryRepositories } from "../src/adapters/memory/repositories.js";
 import { ConversationWorkflow } from "../src/application/conversations/conversation-workflow.js";
 import { SchedulingService } from "../src/application/scheduling/scheduling-service.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
-import type { OperationalRepository, ProcessedWebhookDeliveryInput } from "../src/ports/repositories.js";
+import type {
+  ConversationLookup,
+  OperationalRepository,
+  ProcessedWebhookDeliveryInput,
+  WebhookDeliveryOutcomeInput
+} from "../src/ports/repositories.js";
 
 describe("OperationalRepository port", () => {
   it("allows workflow services to use an async repository implementation", async () => {
@@ -51,10 +56,10 @@ describe("OperationalRepository port", () => {
     });
 
     expect(result.kind).toBe("reply");
-    expect((await repos.getConversation("conv_async"))?.pendingBooking).toEqual(
+    expect((await repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_async" }))?.pendingBooking).toEqual(
       expect.objectContaining({ serviceId: "svc_botox" })
     );
-    expect(repos.conversationLockCalls).toEqual(["conv_async"]);
+    expect(repos.conversationLockCalls).toEqual(["clinic_1:conv_async"]);
   });
 });
 
@@ -83,7 +88,7 @@ class AsyncRepositoryAdapter implements OperationalRepository {
     return this.inner.saveConversation(input);
   }
 
-  async getConversation(input: string) {
+  async getConversation(input: ConversationLookup) {
     return this.inner.getConversation(input);
   }
 
@@ -130,6 +135,26 @@ class AsyncRepositoryAdapter implements OperationalRepository {
 
   async isOptedOut(input: string) {
     return this.inner.isOptedOut(input);
+  }
+
+  async claimWebhookDelivery(input: ProcessedWebhookDeliveryInput) {
+    return this.inner.claimWebhookDelivery(input);
+  }
+
+  async releaseWebhookDeliveryClaim(input: ProcessedWebhookDeliveryInput) {
+    return this.inner.releaseWebhookDeliveryClaim(input);
+  }
+
+  async getWebhookDelivery(input: string) {
+    return this.inner.getWebhookDelivery(input);
+  }
+
+  async saveWebhookDeliveryOutcome(input: WebhookDeliveryOutcomeInput) {
+    return this.inner.saveWebhookDeliveryOutcome(input);
+  }
+
+  async markWebhookDeliveryReadyForRetry(input: ProcessedWebhookDeliveryInput) {
+    return this.inner.markWebhookDeliveryReadyForRetry(input);
   }
 
   async hasProcessedWebhookDelivery(input: string) {

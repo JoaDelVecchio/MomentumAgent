@@ -85,6 +85,11 @@ model Patient {
   interests      PatientInterest[]
 }
 
+model WhatsAppOptOut {
+  whatsappNumber String   @id
+  createdAt      DateTime @default(now())
+}
+
 model Appointment {
   id              String             @id
   clinicId        String
@@ -112,7 +117,7 @@ model Appointment {
 }
 
 model Conversation {
-  id                 String       @id
+  id                 String
   clinicId           String
   patientId          String
   botPaused          Boolean      @default(false)
@@ -122,9 +127,10 @@ model Conversation {
   clinic             Clinic       @relation(fields: [clinicId], references: [id])
   patient            Patient      @relation(fields: [patientId], references: [id])
 
-  @@unique([clinicId, id])
+  @@id([clinicId, id])
   @@index([clinicId, updatedAt])
   @@index([patientId])
+  @@index([id])
 }
 
 model PatientInterest {
@@ -211,6 +217,10 @@ model ProcessedWebhookDelivery {
   clinicId          String
   conversationId    String?
   providerMessageId String?
+  status            String   @default("processed")
+  responseText      String?
+  workflowResult    String?
+  outboundProviderMessageId String?
   processedAt       DateTime @default(now())
   clinic            Clinic   @relation(fields: [clinicId], references: [id])
 

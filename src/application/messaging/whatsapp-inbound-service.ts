@@ -37,56 +37,131 @@ export class WhatsAppInboundService {
   private async handleInboundMessageLocked(
     message: NormalizedWhatsAppInboundMessage
   ): Promise<WhatsAppInboundResult> {
-    if (await this.options.repos.hasProcessedWebhookDelivery(message.idempotencyKey)) {
-      await this.auditDuplicate(message);
-      return { status: "ignored_duplicate" };
-    }
-
-    await this.auditInboundAccepted(message);
-
-    const existingConversation = await this.options.repos.getConversation(message.conversationId);
-    if (existingConversation?.botPaused) {
-      await this.markProcessedWebhookDelivery(message);
-      await this.auditBotPaused(message);
-      return { status: "bot_paused" };
-    }
-
-    const workflowResult = await this.options.workflow.handleInboundMessage({
-      clinicId: message.clinicId,
-      conversationId: message.conversationId,
-      patientId: message.patientId,
-      whatsappNumber: message.whatsappNumber,
-      text: message.text
-    });
-
-    try {
-      const sendResult = await this.options.provider.sendText({
-        clinicId: message.clinicId,
-        to: message.whatsappNumber,
-        text: workflowResult.text
-      });
-
-      await this.markProcessedWebhookDelivery(message);
-      await this.auditOutboundSent(message, workflowResult, sendResult.providerMessageId);
-
-      return {
-        status: "sent",
-        workflowResult: workflowResult.kind,
-        providerMessageId: sendResult.providerMessageId
-      };
-    } catch (error) {
-      await this.auditOutboundFailed(message);
-      throw error;
-    }
-  }
-
-  private async markProcessedWebhookDelivery(message: NormalizedWhatsAppInboundMessage) {
-    await this.options.repos.markProcessedWebhookDelivery({
+    const deliveryClaim = await this.options.repos.claimWebhookDelivery({
       provider: "kapso",
       idempotencyKey: message.idempotencyKey,
       clinicId: message.clinicId,
       conversationId: message.conversationId,
       providerMessageId: message.providerMessageId
+    });
+    if (deliveryClaim.kind === "retry") {
+      return await this.sendPersistedWorkflowResult(message, deliveryClaim.delivery);
+    }
+    if (deliveryClaim.kind === "existing") {
+      await this.auditDuplicate(message);
+      return { status: "ignored_duplicate" };
+    }
+
+    let workflowResult: WorkflowResult;
+    try {
+      await this.auditInboundAccepted(message);
+
+      const existingConversation = await this.options.repos.getConversation({
+        clinicId: message.clinicId,
+        conversationId: message.conversationId
+      });
+      if (existingConversation?.botPaused) {
+        await this.markProcessedWebhookDelivery(message);
+        await this.auditBotPaused(message);
+        return { status: "bot_paused" };
+      }
+
+      workflowResult = await this.options.workflow.handleInboundMessage({
+        clinicId: message.clinicId,
+        conversationId: message.conversationId,
+        patientId: message.patientId,
+        whatsappNumber: message.whatsappNumber,
+        text: message.text
+      });
+
+      await this.options.repos.saveWebhookDeliveryOutcome({
+        provider: "kapso",
+        idempotencyKey: message.idempotencyKey,
+        clinicId: message.clinicId,
+        conversationId: message.conversationId,
+        providerMessageId: message.providerMessageId,
+        responseText: workflowResult.text,
+        workflowResult: workflowResult.kind
+      });
+    } catch (error) {
+      await this.releaseWebhookDeliveryClaim(message);
+      throw error;
+    }
+
+    const sendResult = await this.sendTextOrMarkReadyForRetry(message, workflowResult.text);
+
+    await this.markProcessedWebhookDelivery(message, sendResult.providerMessageId);
+    await this.auditOutboundSent(message, workflowResult.kind, sendResult.providerMessageId);
+
+    return {
+      status: "sent",
+      workflowResult: workflowResult.kind,
+      providerMessageId: sendResult.providerMessageId
+    };
+  }
+
+  private async sendPersistedWorkflowResult(
+    message: NormalizedWhatsAppInboundMessage,
+    delivery: { responseText?: string; workflowResult?: WorkflowResult["kind"] }
+  ): Promise<WhatsAppInboundResult> {
+    if (!delivery.responseText || !delivery.workflowResult) {
+      throw new Error(`Webhook delivery ${message.idempotencyKey} is missing persisted response data`);
+    }
+
+    const sendResult = await this.sendTextOrMarkReadyForRetry(message, delivery.responseText);
+
+    await this.markProcessedWebhookDelivery(message, sendResult.providerMessageId);
+    await this.auditOutboundSent(message, delivery.workflowResult, sendResult.providerMessageId);
+
+    return {
+      status: "sent",
+      workflowResult: delivery.workflowResult,
+      providerMessageId: sendResult.providerMessageId
+    };
+  }
+
+  private async sendTextOrMarkReadyForRetry(message: NormalizedWhatsAppInboundMessage, text: string) {
+    try {
+      return await this.options.provider.sendText({
+        clinicId: message.clinicId,
+        to: message.whatsappNumber,
+        text
+      });
+    } catch (error) {
+      await this.markWebhookDeliveryReadyForRetry(message);
+      await this.auditOutboundFailed(message);
+      throw error;
+    }
+  }
+
+  private async markWebhookDeliveryReadyForRetry(message: NormalizedWhatsAppInboundMessage) {
+    await this.options.repos.markWebhookDeliveryReadyForRetry({
+      provider: "kapso",
+      idempotencyKey: message.idempotencyKey,
+      clinicId: message.clinicId,
+      conversationId: message.conversationId,
+      providerMessageId: message.providerMessageId
+    });
+  }
+
+  private async releaseWebhookDeliveryClaim(message: NormalizedWhatsAppInboundMessage) {
+    await this.options.repos.releaseWebhookDeliveryClaim({
+      provider: "kapso",
+      idempotencyKey: message.idempotencyKey,
+      clinicId: message.clinicId,
+      conversationId: message.conversationId,
+      providerMessageId: message.providerMessageId
+    });
+  }
+
+  private async markProcessedWebhookDelivery(message: NormalizedWhatsAppInboundMessage, outboundProviderMessageId?: string) {
+    await this.options.repos.markProcessedWebhookDelivery({
+      provider: "kapso",
+      idempotencyKey: message.idempotencyKey,
+      clinicId: message.clinicId,
+      conversationId: message.conversationId,
+      providerMessageId: message.providerMessageId,
+      outboundProviderMessageId
     });
   }
 
@@ -134,7 +209,7 @@ export class WhatsAppInboundService {
 
   private async auditOutboundSent(
     message: NormalizedWhatsAppInboundMessage,
-    workflowResult: WorkflowResult,
+    workflowResult: WorkflowResult["kind"],
     providerMessageId: string
   ) {
     await this.options.audit.record({
@@ -146,7 +221,7 @@ export class WhatsAppInboundService {
         inboundProviderMessageId: message.providerMessageId,
         providerMessageId,
         providerPhoneNumberId: message.providerPhoneNumberId,
-        workflowResult: workflowResult.kind
+        workflowResult
       }
     });
   }

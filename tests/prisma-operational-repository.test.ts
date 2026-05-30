@@ -253,7 +253,7 @@ describe("PrismaOperationalRepository core state", () => {
       whatsappNumber: "+5491111111111",
       fullName: "Ana Gomez"
     });
-    expect(await repos.getConversation("conv_1")).toEqual(
+    expect(await repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })).toEqual(
       expect.objectContaining({
         id: "conv_1",
         clinicId: "clinic_1",
@@ -269,12 +269,65 @@ describe("PrismaOperationalRepository core state", () => {
     );
   });
 
+  it("keeps same conversation ids independent across clinics", async () => {
+    await repos.upsertClinicProfile(
+      operationalProfile({
+        clinicId: "clinic_conv_a",
+        serviceId: "svc_conv",
+        professionals: [{ id: "pro_conv", calendarId: "cal_conv_a" }]
+      })
+    );
+    await repos.upsertClinicProfile(
+      operationalProfile({
+        clinicId: "clinic_conv_b",
+        serviceId: "svc_conv",
+        professionals: [{ id: "pro_conv", calendarId: "cal_conv_b" }]
+      })
+    );
+    await repos.upsertPatient({ id: "pat_conv_a", whatsappNumber: "+5491111112233" });
+    await repos.upsertPatient({ id: "pat_conv_b", whatsappNumber: "+5491111112234" });
+
+    await repos.saveConversation({
+      id: "conv_shared",
+      clinicId: "clinic_conv_a",
+      patientId: "pat_conv_a",
+      botPaused: false,
+      createdAt: new Date("2026-05-29T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-29T12:00:00.000Z")
+    });
+    await repos.saveConversation({
+      id: "conv_shared",
+      clinicId: "clinic_conv_b",
+      patientId: "pat_conv_b",
+      botPaused: true,
+      createdAt: new Date("2026-05-29T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-29T12:05:00.000Z")
+    });
+
+    await expect(
+      repos.getConversation({ clinicId: "clinic_conv_a", conversationId: "conv_shared" })
+    ).resolves.toEqual(expect.objectContaining({ clinicId: "clinic_conv_a", patientId: "pat_conv_a", botPaused: false }));
+    await expect(
+      repos.getConversation({ clinicId: "clinic_conv_b", conversationId: "conv_shared" })
+    ).resolves.toEqual(expect.objectContaining({ clinicId: "clinic_conv_b", patientId: "pat_conv_b", botPaused: true }));
+  });
+
   it("persists opt-out state by WhatsApp number", async () => {
     await repos.upsertPatient({ id: "pat_opt_out", whatsappNumber: "+5491111112222" });
     await repos.markOptOut("+5491111112222");
 
     expect(await repos.isOptedOut("+5491111112222")).toBe(true);
     expect(await repos.isOptedOut("+5491111113333")).toBe(false);
+  });
+
+  it("persists opt-out state before a patient exists", async () => {
+    await repos.markOptOut("+5491111119999");
+
+    const freshRepos = new PrismaOperationalRepository(prisma);
+
+    expect(await freshRepos.isOptedOut("+5491111119999")).toBe(true);
+    await freshRepos.upsertPatient({ id: "pat_late_opt_out", whatsappNumber: "+5491111119999" });
+    expect(await freshRepos.isOptedOut("+5491111119999")).toBe(true);
   });
 
   it("persists webhook idempotency across repository instances", async () => {

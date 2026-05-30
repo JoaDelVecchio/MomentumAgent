@@ -1,10 +1,14 @@
 import type { Appointment, ClinicProfile, Id, Patient } from "../../domain/types.js";
 import type {
   Conversation,
+  ConversationLookup,
   OperationalRepository,
   PatientInterest,
   PendingBooking,
-  ProcessedWebhookDeliveryInput
+  ProcessedWebhookDeliveryInput,
+  WebhookDeliveryClaim,
+  WebhookDeliveryOutcomeInput,
+  WebhookDeliveryRecord
 } from "../../ports/repositories.js";
 
 export type { Conversation, PatientInterest, PendingBooking };
@@ -16,7 +20,7 @@ export class InMemoryRepositories implements OperationalRepository {
   private appointments = new Map<Id, Appointment>();
   private interests = new Map<Id, PatientInterest>();
   private optOutWhatsappNumbers = new Set<string>();
-  private processedWebhookDeliveries = new Set<string>();
+  private webhookDeliveries = new Map<string, WebhookDeliveryRecord>();
   private appointmentCounter = 0;
   private appointmentLocks = new Map<Id, Promise<unknown>>();
   private conversationLocks = new Map<Id, Promise<unknown>>();
@@ -41,11 +45,11 @@ export class InMemoryRepositories implements OperationalRepository {
   }
 
   saveConversation(conversation: Conversation) {
-    this.conversations.set(conversation.id, cloneConversation(conversation));
+    this.conversations.set(conversationKey(conversation), cloneConversation(conversation));
   }
 
-  getConversation(conversationId: Id) {
-    const conversation = this.conversations.get(conversationId);
+  getConversation(lookup: ConversationLookup) {
+    const conversation = this.conversations.get(conversationKey({ clinicId: lookup.clinicId, id: lookup.conversationId }));
     return conversation ? cloneConversation(conversation) : undefined;
   }
 
@@ -100,19 +104,83 @@ export class InMemoryRepositories implements OperationalRepository {
   }
 
   hasProcessedWebhookDelivery(idempotencyKey: string) {
-    return (
-      this.processedWebhookDeliveries.has(idempotencyKey) ||
-      this.processedWebhookDeliveries.has(`kapso:${idempotencyKey}`)
-    );
+    return this.getWebhookDelivery(idempotencyKey)?.status === "processed";
+  }
+
+  claimWebhookDelivery(input: ProcessedWebhookDeliveryInput): WebhookDeliveryClaim {
+    const existing = this.getWebhookDelivery(input.idempotencyKey);
+    if (existing) {
+      if (existing.status === "response_ready" && existing.responseText && existing.workflowResult) {
+        const delivery: WebhookDeliveryRecord = { ...existing, ...input, status: "processing" };
+        this.webhookDeliveries.set(deliveryKey(input), delivery);
+        return { kind: "retry", delivery: cloneWebhookDelivery(delivery) };
+      }
+      return { kind: "existing", delivery: existing };
+    }
+
+    const delivery: WebhookDeliveryRecord = { ...input, status: "processing" };
+    this.webhookDeliveries.set(deliveryKey(input), delivery);
+    return { kind: "new", delivery: cloneWebhookDelivery(delivery) };
+  }
+
+  releaseWebhookDeliveryClaim(input: ProcessedWebhookDeliveryInput) {
+    const existing = this.getWebhookDelivery(input.idempotencyKey);
+    if (existing?.status === "processing" && !existing.responseText && !existing.workflowResult) {
+      this.webhookDeliveries.delete(deliveryKey(input));
+    }
+  }
+
+  getWebhookDelivery(idempotencyKey: string) {
+    const delivery =
+      this.webhookDeliveries.get(idempotencyKey) ?? this.webhookDeliveries.get(`kapso:${idempotencyKey}`);
+    return delivery ? cloneWebhookDelivery(delivery) : undefined;
+  }
+
+  saveWebhookDeliveryOutcome(input: WebhookDeliveryOutcomeInput) {
+    const existing = this.getWebhookDelivery(input.idempotencyKey);
+    this.webhookDeliveries.set(deliveryKey(input), {
+      ...existing,
+      ...input,
+      status: "processing"
+    });
+  }
+
+  markWebhookDeliveryReadyForRetry(input: ProcessedWebhookDeliveryInput) {
+    const existing = this.getWebhookDelivery(input.idempotencyKey);
+    if (!existing) {
+      return;
+    }
+
+    this.webhookDeliveries.set(deliveryKey(input), {
+      ...existing,
+      ...input,
+      status: "response_ready"
+    });
   }
 
   markProcessedWebhookDelivery(input: string | ProcessedWebhookDeliveryInput) {
-    this.processedWebhookDeliveries.add(deliveryKey(input));
+    const delivery = normalizeProcessedWebhookDelivery(input);
+    const existing = this.getWebhookDelivery(delivery.idempotencyKey);
+    this.webhookDeliveries.set(deliveryKey(delivery), {
+      ...existing,
+      ...delivery,
+      status: "processed"
+    });
   }
+}
+
+function conversationKey(input: { clinicId: Id; id: Id }) {
+  return `${input.clinicId}:${input.id}`;
 }
 
 function deliveryKey(input: string | ProcessedWebhookDeliveryInput) {
   return typeof input === "string" ? input : `${input.provider}:${input.idempotencyKey}`;
+}
+
+function normalizeProcessedWebhookDelivery(input: string | ProcessedWebhookDeliveryInput): ProcessedWebhookDeliveryInput {
+  return typeof input === "string"
+    ? { provider: "kapso", idempotencyKey: input, clinicId: "clinic_1" }
+    : input;
 }
 
 async function withKeyedLock<T>(
@@ -190,4 +258,8 @@ function clonePatientInterest(interest: PatientInterest): PatientInterest {
     preferredFrom: new Date(interest.preferredFrom),
     preferredTo: new Date(interest.preferredTo)
   };
+}
+
+function cloneWebhookDelivery(delivery: WebhookDeliveryRecord): WebhookDeliveryRecord {
+  return { ...delivery };
 }

@@ -26,7 +26,9 @@ export class ConversationWorkflow {
   ) {}
 
   async handleInboundMessage(input: InboundMessage): Promise<WorkflowResult> {
-    return this.repos.withConversationLock(input.conversationId, () => this.handleInboundMessageLocked(input));
+    return this.repos.withConversationLock(`${input.clinicId}:${input.conversationId}`, () =>
+      this.handleInboundMessageLocked(input)
+    );
   }
 
   private async handleInboundMessageLocked(input: InboundMessage): Promise<WorkflowResult> {
@@ -51,7 +53,10 @@ export class ConversationWorkflow {
     });
 
     if (intent.type === "handoff") {
-      const conversation = await this.repos.getConversation(input.conversationId);
+      const conversation = await this.repos.getConversation({
+        clinicId: input.clinicId,
+        conversationId: input.conversationId
+      });
       if (conversation) {
         await this.repos.saveConversation({ ...conversation, botPaused: true, updatedAt: new Date() });
       }
@@ -67,12 +72,12 @@ export class ConversationWorkflow {
     }
 
     if (intent.type === "cancel") {
-      await this.clearPendingBooking(input.conversationId);
+      await this.clearPendingBooking(input.clinicId, input.conversationId);
       return await this.handleCancelIntent(input);
     }
 
     if (intent.type === "reschedule") {
-      await this.clearPendingBooking(input.conversationId);
+      await this.clearPendingBooking(input.clinicId, input.conversationId);
       return await this.handleRescheduleIntent(input);
     }
 
@@ -93,7 +98,10 @@ export class ConversationWorkflow {
 
   private async upsertConversation(input: InboundMessage): Promise<Conversation> {
     const now = new Date();
-    const existing = await this.repos.getConversation(input.conversationId);
+    const existing = await this.repos.getConversation({
+      clinicId: input.clinicId,
+      conversationId: input.conversationId
+    });
     const conversation = {
       id: input.conversationId,
       clinicId: input.clinicId,
@@ -115,7 +123,7 @@ export class ConversationWorkflow {
 
     const service = findService(profile, serviceName);
     if (!service) {
-      await this.clearPendingBooking(input.conversationId);
+      await this.clearPendingBooking(input.clinicId, input.conversationId);
       return {
         kind: "reply",
         text: serviceName
@@ -133,7 +141,7 @@ export class ConversationWorkflow {
     });
 
     if (slots.length === 0) {
-      await this.clearPendingBooking(input.conversationId);
+      await this.clearPendingBooking(input.clinicId, input.conversationId);
       return {
         kind: "reply",
         text: `No encontre horarios disponibles para ${service.name} esta semana. Te aviso si se libera un turno o podes decirme otro dia.`
@@ -143,14 +151,14 @@ export class ConversationWorkflow {
     const first = slots[0];
     const professional = profile.professionals.find((candidate) => candidate.calendarId === first.calendarId);
     if (!professional) {
-      await this.clearPendingBooking(input.conversationId);
+      await this.clearPendingBooking(input.clinicId, input.conversationId);
       return {
         kind: "reply",
         text: `No pude identificar el profesional disponible para ${service.name}. Te derivo con recepcion.`
       };
     }
 
-    await this.setPendingBooking(input.conversationId, {
+    await this.setPendingBooking(input.clinicId, input.conversationId, {
       serviceId: service.id,
       professionalId: professional.id,
       startsAt: first.startsAt,
@@ -192,7 +200,7 @@ export class ConversationWorkflow {
             professionalId: pending.professionalId,
             conversationId: input.conversationId
           });
-      await this.clearPendingBooking(input.conversationId);
+      await this.clearPendingBooking(input.clinicId, input.conversationId);
 
       return {
         kind: "reply",
@@ -204,7 +212,7 @@ export class ConversationWorkflow {
       if (error instanceof CalendarInfrastructureError) {
         throw error;
       }
-      await this.clearPendingBooking(input.conversationId);
+      await this.clearPendingBooking(input.clinicId, input.conversationId);
       return {
         kind: "reply",
         text: "Ese horario ya no esta disponible. Te busco otro horario si queres."
@@ -212,15 +220,15 @@ export class ConversationWorkflow {
     }
   }
 
-  private async setPendingBooking(conversationId: string, pendingBooking: PendingBooking) {
-    const conversation = await this.repos.getConversation(conversationId);
+  private async setPendingBooking(clinicId: string, conversationId: string, pendingBooking: PendingBooking) {
+    const conversation = await this.repos.getConversation({ clinicId, conversationId });
     if (conversation) {
       await this.repos.saveConversation({ ...conversation, pendingBooking, updatedAt: this.now() });
     }
   }
 
-  private async clearPendingBooking(conversationId: string) {
-    const conversation = await this.repos.getConversation(conversationId);
+  private async clearPendingBooking(clinicId: string, conversationId: string) {
+    const conversation = await this.repos.getConversation({ clinicId, conversationId });
     if (conversation) {
       const { pendingBooking: _pendingBooking, ...nextConversation } = conversation;
       await this.repos.saveConversation({ ...nextConversation, updatedAt: this.now() });
@@ -313,7 +321,7 @@ export class ConversationWorkflow {
       return { kind: "reply", text: "No encontre otro horario disponible para reprogramar. Te aviso si se libera uno." };
     }
 
-    await this.setPendingBooking(input.conversationId, {
+    await this.setPendingBooking(input.clinicId, input.conversationId, {
       appointmentId: appointment.id,
       serviceId: appointment.serviceId,
       professionalId: appointment.professionalId,
