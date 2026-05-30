@@ -11,6 +11,7 @@ import type { CalendarProvider } from "./dev/seed.js";
 import {
   buildGoogleCalendarRuntime,
   buildWhatsAppRuntime,
+  needsOnboardingRuntime,
   readRuntimeClinicId
 } from "./runtime/server-runtime.js";
 
@@ -20,16 +21,25 @@ const calendarProvider = readCalendarProvider(process.env.CALENDAR_PROVIDER);
 const whatsappConfig = readWhatsAppConfig(process.env);
 const outboundConfig = readOutboundConfig(process.env);
 const adminConfig = readAdminConfig(process.env);
+const onboardingRuntimeNeeded = needsOnboardingRuntime({
+  adminEnabled: adminConfig.enabled,
+  whatsappProvider: whatsappConfig.provider,
+  outboundAutomationEnabled: outboundConfig.enabled
+});
 const sharedPrisma =
-  calendarProvider === "google" || whatsappConfig.provider === "kapso" || adminConfig.enabled
+  calendarProvider === "google" || onboardingRuntimeNeeded
     ? new PrismaClient()
     : undefined;
 const googleRuntime =
   calendarProvider === "google" ? await buildGoogleCalendarRuntime({ prisma: requirePrisma(sharedPrisma) }) : undefined;
-const onboardingService = adminConfig.enabled
+const onboardingService = onboardingRuntimeNeeded
   ? new OnboardingService({
-      onboarding: new PrismaOnboardingRepository(requireOnboardingPrisma(sharedPrisma)),
-      operational: new PrismaOperationalRepository(requireOnboardingPrisma(sharedPrisma))
+      onboarding: new PrismaOnboardingRepository(
+        requireOnboardingPrisma(sharedPrisma, adminConfig.enabled ? "admin" : "productionActivation")
+      ),
+      operational: new PrismaOperationalRepository(
+        requireOnboardingPrisma(sharedPrisma, adminConfig.enabled ? "admin" : "productionActivation")
+      )
     })
   : undefined;
 const clinicActivation = onboardingService
@@ -88,8 +98,14 @@ function requirePrisma(prisma: PrismaClient | undefined): PrismaClient {
   return prisma;
 }
 
-function requireOnboardingPrisma(prisma: PrismaClient | undefined): PrismaClient {
+function requireOnboardingPrisma(
+  prisma: PrismaClient | undefined,
+  reason: "admin" | "productionActivation"
+): PrismaClient {
   if (!prisma) {
+    if (reason === "productionActivation") {
+      throw new Error("Prisma runtime is required for production activation gates");
+    }
     throw new Error("Prisma runtime is required when onboarding routes are enabled");
   }
   return prisma;

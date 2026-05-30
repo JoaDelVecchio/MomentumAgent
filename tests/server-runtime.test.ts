@@ -7,7 +7,11 @@ import {
 } from "../src/adapters/prisma/calendar-auth-repository.js";
 import { PrismaAuditLog } from "../src/adapters/prisma/audit-log.js";
 import type { ConversationInterpreter, ConversationInterpreterInput } from "../src/application/conversations/interpreter.js";
-import { buildGoogleCalendarRuntime, buildWhatsAppRuntime } from "../src/runtime/server-runtime.js";
+import {
+  buildGoogleCalendarRuntime,
+  buildWhatsAppRuntime,
+  needsOnboardingRuntime
+} from "../src/runtime/server-runtime.js";
 import { createPrismaTestContext, type PrismaTestContext } from "./helpers/prisma.js";
 
 describe("server runtime persistence wiring", () => {
@@ -174,6 +178,35 @@ describe("server runtime persistence wiring", () => {
       provider: "google",
       refreshToken: "google_refresh_token_from_callback"
     });
+  });
+});
+
+describe("server startup runtime decisions", () => {
+  it("requires onboarding runtime for production automation even when admin routes are disabled", () => {
+    expect(
+      needsOnboardingRuntime({
+        adminEnabled: false,
+        whatsappProvider: "kapso",
+        outboundAutomationEnabled: false
+      })
+    ).toBe(true);
+    expect(
+      needsOnboardingRuntime({
+        adminEnabled: false,
+        whatsappProvider: "disabled",
+        outboundAutomationEnabled: true
+      })
+    ).toBe(true);
+  });
+
+  it("does not require onboarding runtime when only simulation or Google runtime is enabled", () => {
+    expect(
+      needsOnboardingRuntime({
+        adminEnabled: false,
+        whatsappProvider: "disabled",
+        outboundAutomationEnabled: false
+      })
+    ).toBe(false);
   });
 });
 

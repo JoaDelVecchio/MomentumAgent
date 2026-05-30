@@ -139,6 +139,14 @@ export function readRuntimeClinicId(env: NodeJS.ProcessEnv = process.env) {
   return env.SIMULATION_CLINIC_ID ?? "clinic_1";
 }
 
+export function needsOnboardingRuntime(input: {
+  adminEnabled: boolean;
+  whatsappProvider: WhatsAppConfig["provider"];
+  outboundAutomationEnabled: boolean;
+}) {
+  return input.adminEnabled || input.whatsappProvider === "kapso" || input.outboundAutomationEnabled;
+}
+
 class SeedingCalendarCredentialRepository implements CalendarCredentialRepository {
   constructor(
     private readonly prisma: PrismaClient,

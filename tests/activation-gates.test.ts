@@ -62,19 +62,41 @@ describe("production activation gates", () => {
   });
 
   it("returns an empty reminder summary before loading outbound state when a direct service guard is inactive", async () => {
-    const service = new OutboundAutomationService({
-      repos: throwingRepos(),
-      calendar: {} as CalendarPort,
-      templateService: {
-        sendApprovedTemplate: async () => ({ status: "sent", providerMessageId: "msg_1" })
-      } as unknown as OutboundTemplateService,
-      audit: { record: async () => undefined } as unknown as AuditLogPort,
-      clinicActivation: { isClinicActive: () => false }
-    });
+    const service = buildInactiveOutboundAutomationService();
 
     await expect(
       service.runDueReminders({
         clinicId: "clinic_1",
+        now: new Date("2026-06-02T12:00:00.000Z")
+      })
+    ).resolves.toEqual(zeroSummary);
+  });
+
+  it("returns an empty reactivation summary before loading outbound state when a direct service guard is inactive", async () => {
+    const service = buildInactiveOutboundAutomationService();
+
+    await expect(
+      service.runDueReactivations({
+        clinicId: "clinic_1",
+        now: new Date("2026-06-02T12:00:00.000Z")
+      })
+    ).resolves.toEqual(zeroSummary);
+  });
+
+  it("returns an empty freed-slot summary before loading outbound state when a direct service guard is inactive", async () => {
+    const service = buildInactiveOutboundAutomationService();
+
+    await expect(
+      service.handleFreedSlot({
+        clinicId: "clinic_1",
+        serviceId: "svc_botox",
+        sourceAppointmentId: "appt_1",
+        slot: {
+          professionalId: "pro_1",
+          calendarId: "cal_1",
+          startsAt: new Date("2026-06-03T12:00:00.000Z"),
+          endsAt: new Date("2026-06-03T12:30:00.000Z")
+        },
         now: new Date("2026-06-02T12:00:00.000Z")
       })
     ).resolves.toEqual(zeroSummary);
@@ -126,6 +148,18 @@ function throwingRepos() {
       throw new Error("profile should not be loaded for inactive clinics");
     }
   } as unknown as OperationalRepository;
+}
+
+function buildInactiveOutboundAutomationService() {
+  return new OutboundAutomationService({
+    repos: throwingRepos(),
+    calendar: {} as CalendarPort,
+    templateService: {
+      sendApprovedTemplate: async () => ({ status: "sent", providerMessageId: "msg_1" })
+    } as unknown as OutboundTemplateService,
+    audit: { record: async () => undefined } as unknown as AuditLogPort,
+    clinicActivation: { isClinicActive: () => false }
+  });
 }
 
 class FakeInboundService {
