@@ -236,6 +236,9 @@ export function registerOnboardingRoutes(app: FastifyInstance, options: Onboardi
           if (error.code === "clinic_setup_missing") {
             return reply.status(404).send({ error: "not_found" });
           }
+          if (error.code === "unsafe_test_identity") {
+            return reply.status(400).send({ error: "unsafe_test_identity" });
+          }
           return reply.status(409).send({ error: error.code });
         }
         throw error;
