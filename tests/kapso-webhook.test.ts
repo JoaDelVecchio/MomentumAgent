@@ -8,6 +8,7 @@ import {
 } from "../src/adapters/whatsapp/kapso/types.js";
 import { WhatsAppInboundService } from "../src/application/messaging/whatsapp-inbound-service.js";
 import type { WorkflowResult } from "../src/application/conversations/conversation-workflow.js";
+import { buildApp } from "../src/api/app.js";
 import {
   createKapsoWebhookSignature,
   verifyKapsoWebhookSignature
@@ -223,6 +224,90 @@ describe("WhatsAppInboundService", () => {
   });
 });
 
+describe("Kapso webhook route", () => {
+  it("returns 401 on invalid webhook signatures", async () => {
+    const context = buildInboundServiceContext({ kind: "reply", text: "Tengo un turno disponible." });
+    const app = buildWhatsAppWebhookApp(context);
+    const rawBody = JSON.stringify(kapsoReceivedMessagePayload());
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/whatsapp/kapso",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Webhook-Signature": "invalid_signature",
+        "X-Idempotency-Key": "delivery_1"
+      },
+      payload: rawBody
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ error: "invalid_webhook_signature" });
+    expect(context.provider.sentTextMessages).toEqual([]);
+  });
+
+  it("returns 400 on invalid webhook payloads", async () => {
+    const context = buildInboundServiceContext({ kind: "reply", text: "Tengo un turno disponible." });
+    const app = buildWhatsAppWebhookApp(context);
+    const rawBody = JSON.stringify({ invalid: true });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/whatsapp/kapso",
+      headers: signedWebhookHeaders(rawBody),
+      payload: rawBody
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "invalid_webhook_payload" });
+    expect(context.provider.sentTextMessages).toEqual([]);
+  });
+
+  it("returns 200 on valid messages and sends exactly one provider message", async () => {
+    const context = buildInboundServiceContext({ kind: "reply", text: "Tengo un turno disponible." });
+    const app = buildWhatsAppWebhookApp(context);
+    const rawBody = JSON.stringify(kapsoReceivedMessagePayload());
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/whatsapp/kapso",
+      headers: signedWebhookHeaders(rawBody),
+      payload: rawBody
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      status: "sent",
+      workflowResult: "reply",
+      providerMessageId: "msg_1"
+    });
+    expect(context.provider.sentTextMessages).toHaveLength(1);
+  });
+
+  it("returns 200 for duplicate deliveries without sending another provider message", async () => {
+    const context = buildInboundServiceContext({ kind: "reply", text: "Tengo un turno disponible." });
+    const app = buildWhatsAppWebhookApp(context);
+    const rawBody = JSON.stringify(kapsoReceivedMessagePayload());
+
+    await app.inject({
+      method: "POST",
+      url: "/webhooks/whatsapp/kapso",
+      headers: signedWebhookHeaders(rawBody),
+      payload: rawBody
+    });
+    const duplicateResponse = await app.inject({
+      method: "POST",
+      url: "/webhooks/whatsapp/kapso",
+      headers: signedWebhookHeaders(rawBody),
+      payload: rawBody
+    });
+
+    expect(duplicateResponse.statusCode).toBe(200);
+    expect(duplicateResponse.json()).toEqual({ status: "ignored_duplicate" });
+    expect(context.provider.sentTextMessages).toHaveLength(1);
+  });
+});
+
 function kapsoReceivedMessagePayload() {
   return {
     event: "whatsapp.message.received",
@@ -302,6 +387,24 @@ function buildInboundServiceContext(result: WorkflowResult) {
   });
 
   return { repos, provider, audit, workflow, service };
+}
+
+function buildWhatsAppWebhookApp(context: ReturnType<typeof buildInboundServiceContext>) {
+  return buildApp({
+    whatsappKapsoWebhook: {
+      secret: "webhook_secret",
+      phoneNumberClinicMap: { "123456789012345": "clinic_1" },
+      inboundService: context.service
+    }
+  });
+}
+
+function signedWebhookHeaders(rawBody: string) {
+  return {
+    "Content-Type": "application/json",
+    "X-Webhook-Signature": createKapsoWebhookSignature(rawBody, "webhook_secret"),
+    "X-Idempotency-Key": "delivery_1"
+  };
 }
 
 class FakeConversationWorkflow {

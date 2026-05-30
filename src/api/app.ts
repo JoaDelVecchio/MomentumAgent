@@ -4,6 +4,7 @@ import type { CalendarProvider } from "../dev/seed.js";
 import type { CalendarPort } from "../ports/calendar.js";
 import { registerGoogleCalendarRoutes } from "./google-calendar-routes.js";
 import { registerRoutes } from "./routes.js";
+import { registerWhatsAppRoutes, type WhatsAppKapsoWebhookRoutesOptions } from "./whatsapp-routes.js";
 
 type BuildAppOptions = {
   enableSimulationRoutes?: boolean;
@@ -12,6 +13,7 @@ type BuildAppOptions = {
   simulationCalendar?: CalendarPort;
   googleCalendarOAuthService?: GoogleOAuthService;
   googleCalendarSetupToken?: string;
+  whatsappKapsoWebhook?: WhatsAppKapsoWebhookRoutesOptions;
 };
 
 export function buildApp(options: BuildAppOptions = {}) {
@@ -37,6 +39,10 @@ export function buildApp(options: BuildAppOptions = {}) {
       oauthService: options.googleCalendarOAuthService,
       setupToken: options.googleCalendarSetupToken
     });
+  }
+
+  if (options.whatsappKapsoWebhook) {
+    registerWhatsAppRoutes(app, options.whatsappKapsoWebhook);
   }
 
   return app;
