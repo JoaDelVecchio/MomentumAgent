@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { apiJson, adminHeaders } from "../../../../../../lib/api";
+import { isPassingTestModeResult } from "../../../../../../lib/test-mode-readiness";
 import type { TestMessageResponse } from "../../../../../../lib/types";
 
 const defaultMessage = "Hola, quiero reservar botox.";
@@ -86,6 +87,4 @@ export default function ClinicTestModePage() {
   );
 }
 
-function isPassingResult(response: TestMessageResponse | null): boolean {
-  return response?.result.kind === "reply" && Boolean(response.result.text);
-}
+const isPassingResult = isPassingTestModeResult;
