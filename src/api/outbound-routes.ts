@@ -7,7 +7,7 @@ import type {
 
 const runOutboundSchema = z.object({
   clinicId: z.string().min(1),
-  now: z.coerce.date().optional(),
+  now: z.string().datetime({ offset: true }).transform((value) => new Date(value)).optional(),
   reminders: z.boolean().optional(),
   reactivations: z.boolean().optional()
 });
