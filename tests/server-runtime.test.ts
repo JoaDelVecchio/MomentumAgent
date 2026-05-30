@@ -1,11 +1,12 @@
 import { PrismaClient } from "@prisma/client";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { GoogleOAuthClient } from "../src/adapters/google/google-oauth.js";
 import {
   Aes256GcmTokenCipher,
   PrismaCalendarCredentialRepository
 } from "../src/adapters/prisma/calendar-auth-repository.js";
 import { PrismaAuditLog } from "../src/adapters/prisma/audit-log.js";
+import type { ConversationInterpreter, ConversationInterpreterInput } from "../src/application/conversations/interpreter.js";
 import { buildGoogleCalendarRuntime, buildWhatsAppRuntime } from "../src/runtime/server-runtime.js";
 import { createPrismaTestContext, type PrismaTestContext } from "./helpers/prisma.js";
 
@@ -20,6 +21,10 @@ describe("server runtime persistence wiring", () => {
 
   afterAll(async () => {
     await context.cleanup();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("seeds the configured clinic id for Kapso persistence", async () => {
@@ -50,6 +55,46 @@ describe("server runtime persistence wiring", () => {
       id: "clinic_runtime_kapso"
     });
     expect(event.clinicId).toBe("clinic_runtime_kapso");
+  });
+
+  it("uses an injected conversation interpreter for Kapso inbound messages", async () => {
+    const interpreter = new FakeConversationInterpreter();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ messages: [{ id: "wamid.runtime_interpreter" }] }))
+    );
+    const runtime = await buildWhatsAppRuntime({
+      prisma,
+      clinicId: "clinic_runtime_interpreter",
+      config: {
+        provider: "kapso",
+        apiKey: "kapso_api_key",
+        webhookSecret: "kapso_webhook_secret",
+        phoneNumberId: "123456789012346"
+      },
+      calendarProvider: "fake",
+      interpreter
+    });
+
+    await runtime.webhook.inboundService.handleInboundMessage({
+      idempotencyKey: "delivery_runtime_interpreter",
+      clinicId: "clinic_runtime_interpreter",
+      conversationId: "conversation_runtime_interpreter",
+      patientId: "patient_runtime_interpreter",
+      whatsappNumber: "+5491111111111",
+      providerMessageId: "wamid.inbound_runtime_interpreter",
+      providerPhoneNumberId: "123456789012346",
+      text: "hola",
+      receivedAt: new Date("2026-05-30T12:00:00.000Z")
+    });
+
+    expect(interpreter.calls).toHaveLength(1);
+    expect(interpreter.calls[0]).toMatchObject({
+      clinicId: "clinic_runtime_interpreter",
+      conversationId: "conversation_runtime_interpreter",
+      patientId: "patient_runtime_interpreter",
+      messageText: "hola"
+    });
   });
 
   it("seeds the configured clinic id for Google credential persistence", async () => {
@@ -111,6 +156,22 @@ describe("server runtime persistence wiring", () => {
     });
   });
 });
+
+class FakeConversationInterpreter implements ConversationInterpreter {
+  calls: ConversationInterpreterInput[] = [];
+
+  async interpret(input: ConversationInterpreterInput) {
+    this.calls.push(input);
+    return {
+      provider: "rules" as const,
+      intent: "unknown" as const,
+      confidence: 0.5,
+      requestedTopics: [],
+      requiresHuman: false,
+      reason: "Fake interpreter for runtime wiring test."
+    };
+  }
+}
 
 class FakeGoogleOAuthClient implements GoogleOAuthClient {
   constructor(private readonly config: { clientId: string; redirectUri: string }) {}

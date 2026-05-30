@@ -1,4 +1,6 @@
 import { PrismaClient } from "@prisma/client";
+import OpenAI from "openai";
+import { OpenAIConversationInterpreter } from "../adapters/openai/openai-conversation-interpreter.js";
 import { GoogleCalendarAdapter } from "../adapters/google/google-calendar-adapter.js";
 import { GoogleCalendarApiClient } from "../adapters/google/google-calendar-client.js";
 import { GoogleOAuthService, type GoogleOAuthClient } from "../adapters/google/google-oauth.js";
@@ -10,8 +12,11 @@ import {
 import { PrismaOperationalRepository } from "../adapters/prisma/operational-repository.js";
 import { KapsoWhatsAppProvider } from "../adapters/whatsapp/kapso/kapso-whatsapp-provider.js";
 import { ConversationWorkflow } from "../application/conversations/conversation-workflow.js";
+import type { ConversationInterpreter } from "../application/conversations/interpreter.js";
+import { RulesConversationInterpreter } from "../application/conversations/rules-interpreter.js";
 import { WhatsAppInboundService } from "../application/messaging/whatsapp-inbound-service.js";
 import { SchedulingService } from "../application/scheduling/scheduling-service.js";
+import { readAIConfig, type AIConfig } from "../config/ai.js";
 import { readGoogleCalendarConfig, type GoogleCalendarConfig } from "../config/google-calendar.js";
 import type { WhatsAppConfig } from "../config/whatsapp.js";
 import { buildDemoClinicProfile } from "../dev/demo-clinic-profile.js";
@@ -60,6 +65,8 @@ export async function buildWhatsAppRuntime(input: {
   calendarProvider: CalendarProvider;
   calendar?: CalendarPort;
   clinicId?: string;
+  aiConfig?: AIConfig;
+  interpreter?: ConversationInterpreter;
 }) {
   const clinicId = input.clinicId ?? readRuntimeClinicId();
   const repos = new PrismaOperationalRepository(input.prisma);
@@ -70,7 +77,8 @@ export async function buildWhatsAppRuntime(input: {
     input.calendar ?? buildDefaultCalendar(input.calendarProvider),
     audit
   );
-  const workflow = new ConversationWorkflow(repos, scheduling, audit);
+  const interpreter = input.interpreter ?? buildConversationInterpreter(input.aiConfig ?? readAIConfig());
+  const workflow = new ConversationWorkflow(repos, scheduling, audit, () => new Date(), interpreter);
   const provider = new KapsoWhatsAppProvider({
     apiKey: input.config.apiKey,
     phoneNumberId: input.config.phoneNumberId
@@ -88,6 +96,18 @@ export async function buildWhatsAppRuntime(input: {
       })
     }
   };
+}
+
+function buildConversationInterpreter(config: AIConfig): ConversationInterpreter {
+  if (config.provider === "rules") {
+    return new RulesConversationInterpreter();
+  }
+
+  return new OpenAIConversationInterpreter({
+    client: new OpenAI({ apiKey: config.apiKey }),
+    model: config.model,
+    timeoutMs: config.timeoutMs
+  });
 }
 
 export async function seedRuntimeClinicProfile(prisma: PrismaClient, clinicId: string) {

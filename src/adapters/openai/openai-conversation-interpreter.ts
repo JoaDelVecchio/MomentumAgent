@@ -38,7 +38,7 @@ const openAIParsedConversationUnderstandingSchema = openAIConversationUnderstand
 
 type OpenAIResponsesClient = {
   responses: {
-    parse: (body: unknown, options?: { timeout?: number }) => Promise<{ output_parsed: unknown }>;
+    parse: (body: any, options?: { timeout?: number }) => Promise<{ output_parsed: unknown }>;
   };
 };
 

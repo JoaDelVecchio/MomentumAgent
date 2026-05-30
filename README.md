@@ -70,6 +70,25 @@ Start local API:
 ENABLE_SIMULATION_API=true npm run dev
 ```
 
+### AI conversation interpreter
+
+Momentum defaults to the deterministic rule-based interpreter:
+
+```bash
+AI_INTERPRETER_PROVIDER=rules
+```
+
+To enable OpenAI structured understanding for the real Kapso runtime:
+
+```bash
+AI_INTERPRETER_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-5-mini
+OPENAI_TIMEOUT_MS=1500
+```
+
+The model only returns structured conversation understanding. Calendar availability, booking, rescheduling, cancellation, and WhatsApp side effects remain controlled by application code.
+
 Simulate an inbound WhatsApp message:
 
 ```bash
