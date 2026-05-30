@@ -88,6 +88,31 @@ describe("OpenAIConversationInterpreter", () => {
       })
     );
   });
+
+  it("falls back when the OpenAI client throws", async () => {
+    const client = new ThrowingOpenAIClient();
+    const result = await new OpenAIConversationInterpreter({
+      client,
+      model: "gpt-5-mini",
+      timeoutMs: 500
+    }).interpret({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      messageText: "hola",
+      now: new Date("2026-05-29T12:00:00.000Z"),
+      clinicProfile: profile
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: "fallback",
+        intent: "unknown",
+        confidence: 0,
+        requiresHuman: false
+      })
+    );
+  });
 });
 
 class FakeOpenAIClient {
@@ -99,6 +124,14 @@ class FakeOpenAIClient {
     parse: async (body: unknown) => {
       this.lastBody = body;
       return { output_parsed: this.parsed };
+    }
+  };
+}
+
+class ThrowingOpenAIClient {
+  responses = {
+    parse: async () => {
+      throw new Error("OpenAI request failed");
     }
   };
 }
