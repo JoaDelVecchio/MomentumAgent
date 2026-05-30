@@ -93,6 +93,22 @@ export class OutboundAutomationService {
           patientId: input.appointment.patientId
         })
       : [];
+
+    const patientOptedOut = patient ? await this.options.repos.isOptedOut(patient.whatsappNumber) : false;
+    if (
+      patient &&
+      !patientOptedOut &&
+      isInsideQuietHours({ now: input.now, timezone: input.profile.timezone })
+    ) {
+      input.summary.blocked += 1;
+      await this.auditQuietHoursBlock({
+        appointment: input.appointment,
+        patient,
+        conversationId: conversations[0]?.id
+      });
+      return;
+    }
+
     const claim = await this.options.repos.claimOutboundDelivery({
       key,
       clinicId: input.appointment.clinicId,
@@ -114,32 +130,32 @@ export class OutboundAutomationService {
       return;
     }
 
-    if (!patient) {
-      input.summary.blocked += 1;
-      await this.blockDelivery({ delivery: claim.delivery, reason: "missing_patient", now: input.now });
-      return;
-    }
-
-    const blockReason = await this.reminderBlockReason({
-      appointment: input.appointment,
-      profile: input.profile,
-      patient,
-      now: input.now
-    });
-    if (blockReason) {
-      input.summary.blocked += 1;
-      await this.blockDelivery({ delivery: claim.delivery, reason: blockReason, now: input.now });
-      return;
-    }
-
-    const service = input.profile.services.find((candidate) => candidate.id === input.appointment.serviceId);
-    if (!service) {
-      input.summary.blocked += 1;
-      await this.blockDelivery({ delivery: claim.delivery, reason: "missing_service", now: input.now });
-      return;
-    }
-
     try {
+      if (!patient) {
+        input.summary.blocked += 1;
+        await this.blockDelivery({ delivery: claim.delivery, reason: "missing_patient", now: input.now });
+        return;
+      }
+
+      const blockReason = await this.reminderBlockReason({
+        appointment: input.appointment,
+        profile: input.profile,
+        patient,
+        now: input.now
+      });
+      if (blockReason) {
+        input.summary.blocked += 1;
+        await this.blockDelivery({ delivery: claim.delivery, reason: blockReason, now: input.now });
+        return;
+      }
+
+      const service = input.profile.services.find((candidate) => candidate.id === input.appointment.serviceId);
+      if (!service) {
+        input.summary.blocked += 1;
+        await this.blockDelivery({ delivery: claim.delivery, reason: "missing_service", now: input.now });
+        return;
+      }
+
       const result = await this.options.templateService.sendApprovedTemplate(
         buildOutboundTemplate({
           clinicId: input.appointment.clinicId,
@@ -179,11 +195,11 @@ export class OutboundAutomationService {
         }
       });
     } catch (error) {
-      input.summary.failed += 1;
-      await this.failDelivery({
+      await this.handleClaimedDeliveryError({
         delivery: claim.delivery,
         reason: errorMessage(error),
-        now: input.now
+        now: input.now,
+        summary: input.summary
       });
     }
   }
@@ -209,10 +225,6 @@ export class OutboundAutomationService {
   }): Promise<ReminderBlockReason | undefined> {
     if (await this.options.repos.isOptedOut(input.patient.whatsappNumber)) {
       return "opt_out";
-    }
-
-    if (isInsideQuietHours({ now: input.now, timezone: input.profile.timezone })) {
-      return "quiet_hours";
     }
 
     if (await this.patientHasPausedConversation(input.appointment.clinicId, input.patient.id)) {
@@ -282,6 +294,24 @@ export class OutboundAutomationService {
     });
   }
 
+  private async auditQuietHoursBlock(input: {
+    appointment: Appointment;
+    patient: Patient;
+    conversationId?: string;
+  }): Promise<void> {
+    try {
+      await this.auditBlocked({
+        clinicId: input.appointment.clinicId,
+        conversationId: input.conversationId,
+        appointmentId: input.appointment.id,
+        patientId: input.patient.id,
+        reason: "quiet_hours"
+      });
+    } catch {
+      // Quiet-hours blocks are temporary and must not consume the delivery key.
+    }
+  }
+
   private async failDelivery(input: {
     delivery: OutboundDeliveryRecord;
     reason: string;
@@ -303,6 +333,25 @@ export class OutboundAutomationService {
         ...(input.delivery.appointmentId ? { appointmentId: input.delivery.appointmentId } : {}),
         ...(input.delivery.patientId ? { patientId: input.delivery.patientId } : {})
       }
+    });
+  }
+
+  private async handleClaimedDeliveryError(input: {
+    delivery: OutboundDeliveryRecord;
+    reason: string;
+    now: Date;
+    summary: OutboundAutomationSummary;
+  }): Promise<void> {
+    const currentDelivery = await this.options.repos.getOutboundDelivery(input.delivery.key);
+    if (currentDelivery?.status !== "claimed") {
+      return;
+    }
+
+    input.summary.failed += 1;
+    await this.failDelivery({
+      delivery: input.delivery,
+      reason: input.reason,
+      now: input.now
     });
   }
 }

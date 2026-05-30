@@ -77,6 +77,35 @@ describe("OutboundAutomationService reminders", () => {
     expect(context.provider.sentTemplateMessages).toEqual([]);
   });
 
+  it("does not consume the final reminder key during quiet hours", async () => {
+    const context = await buildReminderContext({
+      appointmentStartsAt: new Date("2026-06-03T11:30:00.000Z")
+    });
+
+    const quietHoursSummary = await context.service.runDueReminders({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T11:30:00.000Z")
+    });
+
+    expect(quietHoursSummary).toEqual({ sent: 0, blocked: 1, failed: 0, skipped: 0 });
+    expect(await context.repos.getOutboundDelivery("reminder:appt_1:24h")).toBeUndefined();
+
+    const allowedHoursSummary = await context.service.runDueReminders({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:00:00.000Z")
+    });
+
+    expect(allowedHoursSummary).toEqual({ sent: 1, blocked: 0, failed: 0, skipped: 0 });
+    expect(await context.repos.getOutboundDelivery("reminder:appt_1:24h")).toEqual(
+      expect.objectContaining({
+        status: "sent",
+        appointmentId: "appt_1",
+        patientId: "pat_1"
+      })
+    );
+    expect(context.provider.sentTemplateMessages).toHaveLength(1);
+  });
+
   it("blocks reminder when calendar event is cancelled", async () => {
     const context = await buildReminderContext({
       appointmentStartsAt: new Date("2026-06-03T12:00:00.000Z")
@@ -136,6 +165,28 @@ describe("OutboundAutomationService reminders", () => {
       expect.objectContaining({
         status: "failed",
         failureReason: "kapso unavailable"
+      })
+    );
+  });
+
+  it("marks claimed deliveries failed when a post-claim dependency fails", async () => {
+    const context = await buildReminderContext({
+      appointmentStartsAt: new Date("2026-06-03T12:00:00.000Z")
+    });
+    context.calendar.getEvent = async () => {
+      throw new Error("calendar unavailable");
+    };
+
+    const summary = await context.service.runDueReminders({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:00:00.000Z")
+    });
+
+    expect(summary).toEqual({ sent: 0, blocked: 0, failed: 1, skipped: 0 });
+    expect(await context.repos.getOutboundDelivery("reminder:appt_1:24h")).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        failureReason: "calendar unavailable"
       })
     );
   });
