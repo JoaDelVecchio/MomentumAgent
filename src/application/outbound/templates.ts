@@ -8,19 +8,44 @@ export type OutboundTemplateKind =
   | "reactivation_2"
   | "freed_slot_offer";
 
-type OutboundTemplateParameters = {
+type AppointmentTemplateKind =
+  | "reminder_72h"
+  | "reminder_24h"
+  | "reminder_same_day"
+  | "freed_slot_offer";
+
+type ReactivationTemplateKind = "reactivation_1" | "reactivation_2";
+
+type AppointmentTemplateParameters = {
   clinicName: string;
   serviceName: string;
-  appointmentTimeText?: string;
+  appointmentTimeText: string;
 };
 
-type BuildOutboundTemplateInput = {
+type ReactivationTemplateParameters = {
+  clinicName: string;
+  serviceName: string;
+};
+
+type BuildOutboundAppointmentTemplateInput = {
   clinicId: string;
   to: string;
-  kind: OutboundTemplateKind;
+  kind: AppointmentTemplateKind;
   languageCode?: string;
-  parameters: OutboundTemplateParameters;
+  parameters: AppointmentTemplateParameters;
 };
+
+type BuildOutboundReactivationTemplateInput = {
+  clinicId: string;
+  to: string;
+  kind: ReactivationTemplateKind;
+  languageCode?: string;
+  parameters: ReactivationTemplateParameters;
+};
+
+type BuildOutboundTemplateInput =
+  | BuildOutboundAppointmentTemplateInput
+  | BuildOutboundReactivationTemplateInput;
 
 const templateNames: Record<OutboundTemplateKind, string> = {
   reminder_72h: "appointment_reminder_72h",
@@ -37,17 +62,23 @@ export function buildOutboundTemplate(input: BuildOutboundTemplateInput): SendTe
     to: input.to,
     templateName: templateNames[input.kind],
     languageCode: input.languageCode ?? "es_AR",
-    parameters: templateParameters(input.kind, input.parameters)
+    parameters: templateParameters(input)
   };
 }
 
-function templateParameters(
-  kind: OutboundTemplateKind,
-  parameters: OutboundTemplateParameters
-): string[] {
-  if (kind === "reactivation_1" || kind === "reactivation_2") {
-    return [parameters.clinicName, parameters.serviceName];
+function templateParameters(input: BuildOutboundTemplateInput): string[] {
+  switch (input.kind) {
+    case "reminder_72h":
+    case "reminder_24h":
+    case "reminder_same_day":
+    case "freed_slot_offer":
+      return [
+        input.parameters.clinicName,
+        input.parameters.serviceName,
+        input.parameters.appointmentTimeText
+      ];
+    case "reactivation_1":
+    case "reactivation_2":
+      return [input.parameters.clinicName, input.parameters.serviceName];
   }
-
-  return [parameters.clinicName, parameters.serviceName, parameters.appointmentTimeText ?? ""];
 }
