@@ -228,4 +228,86 @@ describe("ConversationWorkflow with AI understanding", () => {
       })
     );
   });
+
+  it("filters offered booking slots by AI professional preference", async () => {
+    const { calendar, repos, workflow } = buildContext(
+      new FakeInterpreter(
+        understanding({
+          intent: "book",
+          serviceName: "Botox",
+          professionalPreference: "Dra. Gomez"
+        })
+      )
+    );
+
+    const profile = parseClinicProfile({
+      clinicId: "clinic_1",
+      name: "Clinica Demo",
+      timezone: "America/Argentina/Buenos_Aires",
+      services: [
+        {
+          id: "svc_botox",
+          name: "Botox",
+          durationMinutes: 30,
+          priceText: "Desde $120.000",
+          preparation: "Evitar alcohol 24 horas antes.",
+          restrictions: [],
+          professionalIds: ["pro_perez", "pro_gomez"]
+        }
+      ],
+      professionals: [
+        { id: "pro_perez", name: "Dra. Perez", calendarId: "cal_perez" },
+        { id: "pro_gomez", name: "Dra. Gomez", calendarId: "cal_gomez" }
+      ],
+      appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 0, bufferMinutes: 0 },
+      requiredPatientFields: ["fullName"]
+    });
+    repos.upsertClinicProfile(profile);
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
+    ]);
+    calendar.seedAvailability("cal_gomez", [
+      { startsAt: new Date("2026-06-01T15:00:00.000Z"), endsAt: new Date("2026-06-01T15:30:00.000Z") }
+    ]);
+
+    const result = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Quiero botox con la dra gomez"
+    });
+
+    expect(result.kind).toBe("reply");
+    expect(result.text).toContain("2026-06-01T15:00:00.000Z");
+    expect(result.text).not.toContain("2026-06-01T13:00:00.000Z");
+  });
+
+  it("filters offered booking slots by normalized afternoon preference", async () => {
+    const { calendar, workflow } = buildContext(
+      new FakeInterpreter(
+        understanding({
+          intent: "book",
+          serviceName: "Botox",
+          timePreference: "a la tarde",
+          normalizedTimePreference: { daypart: "afternoon" }
+        })
+      )
+    );
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T10:00:00.000Z"), endsAt: new Date("2026-06-01T10:30:00.000Z") },
+      { startsAt: new Date("2026-06-01T15:00:00.000Z"), endsAt: new Date("2026-06-01T15:30:00.000Z") }
+    ]);
+
+    const result = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Quiero botox a la tarde"
+    });
+
+    expect(result.kind).toBe("reply");
+    expect(result.text).toContain("2026-06-01T15:00:00.000Z");
+  });
 });

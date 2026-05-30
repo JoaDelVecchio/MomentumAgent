@@ -4,10 +4,11 @@ import { CalendarInfrastructureError } from "../../ports/calendar.js";
 import type { Conversation, OperationalRepository, PendingBooking } from "../../ports/repositories.js";
 import type { SchedulingService } from "../scheduling/scheduling-service.js";
 import { buildFaqResponse } from "./faq-response.js";
-import type { ConversationInterpreter } from "./interpreter.js";
+import type { ConversationInterpreter, ConversationUnderstanding } from "./interpreter.js";
 import { normalizeText } from "./intent.js";
 import { RulesConversationInterpreter } from "./rules-interpreter.js";
-import { findService, formatServiceList } from "./service-matching.js";
+import { findProfessional, findService, formatServiceList } from "./service-matching.js";
+import { filterSlotsByDaypart, resolveSlotSearchRange } from "./time-preferences.js";
 
 type InboundMessage = {
   clinicId: string;
@@ -78,7 +79,7 @@ export class ConversationWorkflow {
     }
 
     if (intent.intent === "book") {
-      return await this.handleBookingIntent(input, intent.serviceName ?? "");
+      return await this.handleBookingIntent(input, intent);
     }
 
     if (intent.intent === "confirm") {
@@ -147,30 +148,42 @@ export class ConversationWorkflow {
     return conversation;
   }
 
-  private async handleBookingIntent(input: InboundMessage, serviceName: string): Promise<WorkflowResult> {
+  private async handleBookingIntent(input: InboundMessage, intent: ConversationUnderstanding): Promise<WorkflowResult> {
     const profile = await this.repos.getClinicProfile(input.clinicId);
     if (!profile) {
       return { kind: "reply", text: "No tengo la agenda configurada para esta clinica todavia." };
     }
 
-    const service = findService(profile, serviceName);
+    const service = findService(profile, intent.serviceName);
     if (!service) {
       await this.clearPendingBooking(input.clinicId, input.conversationId);
       return {
         kind: "reply",
-        text: serviceName
+        text: intent.serviceName
           ? `No encontre ese tratamiento. Por ahora puedo ayudarte con: ${formatServiceList(profile)}.`
           : `Decime que tratamiento queres reservar. Por ahora puedo ayudarte con: ${formatServiceList(profile)}.`
       };
     }
 
+    const preferredProfessional = findProfessional(profile, intent.professionalPreference);
     const searchFrom = startOfDay(this.now());
-    const slots = await this.scheduling.findSlots({
-      clinicId: input.clinicId,
-      serviceId: service.id,
-      from: searchFrom,
-      to: addDays(searchFrom, 14)
+    const defaultTo = addDays(searchFrom, 14);
+    const range = resolveSlotSearchRange({
+      now: this.now(),
+      defaultFrom: searchFrom,
+      defaultTo,
+      understanding: intent
     });
+    const slots = filterSlotsByDaypart(
+      await this.scheduling.findSlots({
+        clinicId: input.clinicId,
+        serviceId: service.id,
+        professionalId: preferredProfessional?.id,
+        from: range.from,
+        to: range.to
+      }),
+      intent
+    );
 
     if (slots.length === 0) {
       await this.clearPendingBooking(input.clinicId, input.conversationId);
