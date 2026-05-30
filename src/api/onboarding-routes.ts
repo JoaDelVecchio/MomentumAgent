@@ -2,6 +2,10 @@ import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { OnboardingService } from "../application/onboarding/onboarding-service.js";
+import {
+  OnboardingTestModeError,
+  type OnboardingTestModeService
+} from "../application/onboarding/test-mode-service.js";
 
 const leadSchema = z.object({
   contactName: z.string().trim().min(1),
@@ -51,6 +55,13 @@ const readinessSchema = z.object({
   now: z.string().datetime({ offset: true }).transform((value) => new Date(value)).optional()
 });
 
+const testMessageSchema = z.object({
+  text: z.string().trim().min(1),
+  conversationId: z.string().trim().min(1).optional(),
+  patientId: z.string().trim().min(1).optional(),
+  whatsappNumber: z.string().trim().min(1).optional()
+});
+
 const leadParamsSchema = z.object({ leadId: z.string().min(1) });
 const clinicParamsSchema = z.object({ clinicId: z.string().min(1) });
 
@@ -70,6 +81,7 @@ export type OnboardingRoutesOptions = {
     | "activateClinic"
     | "pauseClinic"
   >;
+  testModeService?: Pick<OnboardingTestModeService, "runMessage">;
 };
 
 export function registerOnboardingRoutes(app: FastifyInstance, options: OnboardingRoutesOptions) {
@@ -195,6 +207,41 @@ export function registerOnboardingRoutes(app: FastifyInstance, options: Onboardi
       throw error;
     }
   });
+
+  const testModeService = options.testModeService;
+  if (testModeService) {
+    app.post("/internal/onboarding/clinics/:clinicId/test-message", async (request, reply) => {
+      if (!isAuthorized(request.headers.authorization, options.adminToken)) {
+        return reply.status(401).send({ error: "unauthorized" });
+      }
+
+      const params = clinicParamsSchema.safeParse(request.params);
+      const body = testMessageSchema.safeParse(request.body);
+      if (!params.success || !body.success) {
+        return reply.status(400).send({ error: "invalid_test_message" });
+      }
+
+      const { clinicId } = params.data;
+      try {
+        const result = await testModeService.runMessage({
+          clinicId,
+          conversationId: body.data.conversationId ?? `test:${clinicId}`,
+          patientId: body.data.patientId ?? `test_patient:${clinicId}`,
+          whatsappNumber: body.data.whatsappNumber ?? "+5490000000000",
+          text: body.data.text
+        });
+        return reply.send({ result });
+      } catch (error) {
+        if (error instanceof OnboardingTestModeError) {
+          if (error.code === "clinic_setup_missing") {
+            return reply.status(404).send({ error: "not_found" });
+          }
+          return reply.status(409).send({ error: error.code });
+        }
+        throw error;
+      }
+    });
+  }
 
   app.post("/internal/onboarding/clinics/:clinicId/activate", async (request, reply) => {
     if (!isAuthorized(request.headers.authorization, options.adminToken)) {
