@@ -1,9 +1,10 @@
 import type { AuditLogPort } from "../../ports/audit-log.js";
 import type { CalendarPort } from "../../ports/calendar.js";
-import type { OperationalRepository, OutboundDeliveryRecord } from "../../ports/repositories.js";
+import type { Conversation, OperationalRepository, OutboundDeliveryRecord } from "../../ports/repositories.js";
 import type { Appointment, ClinicProfile, Patient } from "../../domain/types.js";
 import { OutboundTemplateService } from "../messaging/outbound-template-service.js";
 import { isInsideQuietHours } from "./quiet-hours.js";
+import { canReactivate } from "./reactivation-policy.js";
 import { type ReminderKind, shouldSendReminder } from "./reminder-policy.js";
 import { buildOutboundTemplate } from "./templates.js";
 
@@ -30,6 +31,9 @@ type ReminderBlockReason =
   | "missing_service";
 
 type ReminderTemplateKind = "reminder_72h" | "reminder_24h" | "reminder_same_day";
+type ReactivationBlockReason = "missing_patient" | "missing_service" | "opt_out" | "handoff_paused" | "future_appointment";
+type OutboundBlockReason = ReminderBlockReason | ReactivationBlockReason;
+type ReactivationTemplateKind = "reactivation_1" | "reactivation_2";
 
 export class OutboundAutomationService {
   constructor(private readonly options: OutboundAutomationServiceOptions) {}
@@ -76,6 +80,138 @@ export class OutboundAutomationService {
     }
 
     return summary;
+  }
+
+  async runDueReactivations(input: { clinicId: string; now: Date }): Promise<OutboundAutomationSummary> {
+    const profile = await this.requireProfile(input.clinicId);
+    const summary = emptySummary();
+    const conversations = await this.options.repos.listConversationsByClinic(input.clinicId);
+
+    for (const conversation of conversations) {
+      if (!conversation.pendingBooking) {
+        continue;
+      }
+
+      const attempt = await this.nextReactivationAttempt(conversation, input.now);
+      if (!attempt) {
+        continue;
+      }
+
+      await this.processReactivation({
+        conversation,
+        profile,
+        attempt,
+        now: input.now,
+        summary
+      });
+    }
+
+    return summary;
+  }
+
+  private async processReactivation(input: {
+    conversation: Conversation;
+    profile: ClinicProfile;
+    attempt: 1 | 2;
+    now: Date;
+    summary: OutboundAutomationSummary;
+  }) {
+    const pendingBooking = input.conversation.pendingBooking;
+    if (!pendingBooking) {
+      return;
+    }
+
+    const patient = await this.options.repos.getPatient(input.conversation.patientId);
+    const service = input.profile.services.find((candidate) => candidate.id === pendingBooking.serviceId);
+    const claim = await this.options.repos.claimOutboundDelivery({
+      key: reactivationDeliveryKey(input.conversation.id, input.attempt),
+      clinicId: input.conversation.clinicId,
+      automationType: "reactivation",
+      toWhatsappNumber: patient?.whatsappNumber ?? "",
+      patientId: input.conversation.patientId,
+      conversationId: input.conversation.id,
+      templateName: reactivationTemplateName(input.attempt),
+      metadata: {
+        attempt: String(input.attempt),
+        serviceId: pendingBooking.serviceId
+      },
+      now: input.now
+    });
+
+    if (claim.kind === "existing") {
+      input.summary.skipped += 1;
+      return;
+    }
+
+    try {
+      if (!patient) {
+        input.summary.blocked += 1;
+        await this.blockDelivery({ delivery: claim.delivery, reason: "missing_patient", now: input.now });
+        return;
+      }
+
+      const blockReason = await this.reactivationBlockReason({
+        conversation: input.conversation,
+        patient,
+        now: input.now
+      });
+      if (blockReason) {
+        input.summary.blocked += 1;
+        await this.blockDelivery({ delivery: claim.delivery, reason: blockReason, now: input.now });
+        return;
+      }
+
+      if (!service) {
+        input.summary.blocked += 1;
+        await this.blockDelivery({ delivery: claim.delivery, reason: "missing_service", now: input.now });
+        return;
+      }
+
+      const result = await this.options.templateService.sendApprovedTemplate(
+        buildOutboundTemplate({
+          clinicId: input.conversation.clinicId,
+          to: patient.whatsappNumber,
+          kind: reactivationTemplateKind(input.attempt),
+          parameters: {
+            clinicName: input.profile.name,
+            serviceName: service.name
+          }
+        })
+      );
+
+      if (result.status === "blocked_opt_out") {
+        input.summary.blocked += 1;
+        await this.blockDelivery({ delivery: claim.delivery, reason: "opt_out", now: input.now });
+        return;
+      }
+
+      await this.options.repos.markOutboundDeliverySent({
+        key: claim.delivery.key,
+        providerMessageId: result.providerMessageId,
+        sentAt: input.now
+      });
+      input.summary.sent += 1;
+      await this.options.audit.record({
+        clinicId: claim.delivery.clinicId,
+        conversationId: claim.delivery.conversationId,
+        type: "outbound.reactivation.sent",
+        message: "Sent warm lead reactivation",
+        metadata: {
+          key: claim.delivery.key,
+          patientId: patient.id,
+          attempt: String(input.attempt),
+          serviceId: pendingBooking.serviceId,
+          providerMessageId: result.providerMessageId
+        }
+      });
+    } catch (error) {
+      await this.handleClaimedDeliveryError({
+        delivery: claim.delivery,
+        reason: errorMessage(error),
+        now: input.now,
+        summary: input.summary
+      });
+    }
   }
 
   private async processReminder(input: {
@@ -239,6 +375,66 @@ export class OutboundAutomationService {
     return undefined;
   }
 
+  private async reactivationBlockReason(input: {
+    conversation: Conversation;
+    patient: Patient;
+    now: Date;
+  }): Promise<ReactivationBlockReason | undefined> {
+    if (await this.options.repos.isOptedOut(input.patient.whatsappNumber)) {
+      return "opt_out";
+    }
+
+    if (input.conversation.botPaused) {
+      return "handoff_paused";
+    }
+
+    const appointments = await this.options.repos.listAppointmentsByPatient(input.patient.id);
+    if (
+      appointments.some(
+        (appointment) => appointment.status === "scheduled" && appointment.startsAt.getTime() > input.now.getTime()
+      )
+    ) {
+      return "future_appointment";
+    }
+
+    return undefined;
+  }
+
+  private async nextReactivationAttempt(conversation: Conversation, now: Date): Promise<1 | 2 | undefined> {
+    const first = await this.options.repos.getOutboundDelivery(reactivationDeliveryKey(conversation.id, 1));
+
+    if (first?.status !== "sent") {
+      return canReactivate({
+        hadPriorConversation: true,
+        optedOut: false,
+        previousAttempts: 0,
+        now,
+        lastAttemptAt: conversation.updatedAt
+      })
+        ? 1
+        : undefined;
+    }
+
+    const second = await this.options.repos.getOutboundDelivery(reactivationDeliveryKey(conversation.id, 2));
+    if (second?.status === "sent") {
+      return undefined;
+    }
+
+    if (conversation.updatedAt.getTime() > first.sentAt!.getTime()) {
+      return undefined;
+    }
+
+    return canReactivate({
+      hadPriorConversation: true,
+      optedOut: false,
+      previousAttempts: 1,
+      now,
+      lastAttemptAt: first.sentAt
+    })
+      ? 2
+      : undefined;
+  }
+
   private async patientHasPausedConversation(clinicId: string, patientId: string): Promise<boolean> {
     const conversations = await this.options.repos.listConversationsByPatient({ clinicId, patientId });
     return conversations.some((conversation) => conversation.botPaused);
@@ -254,7 +450,7 @@ export class OutboundAutomationService {
 
   private async blockDelivery(input: {
     delivery: OutboundDeliveryRecord;
-    reason: ReminderBlockReason;
+    reason: OutboundBlockReason;
     now: Date;
   }): Promise<void> {
     await this.options.repos.markOutboundDeliveryBlocked({
@@ -278,7 +474,7 @@ export class OutboundAutomationService {
     appointmentId?: string;
     patientId?: string;
     key?: string;
-    reason: ReminderBlockReason;
+    reason: OutboundBlockReason;
   }): Promise<void> {
     await this.options.audit.record({
       clinicId: input.clinicId,
@@ -384,6 +580,18 @@ function reminderTemplateKind(kind: Exclude<ReminderKind, "none">): ReminderTemp
     case "same-day":
       return "reminder_same_day";
   }
+}
+
+function reactivationDeliveryKey(conversationId: string, attempt: 1 | 2): string {
+  return `reactivation:${conversationId}:${attempt}`;
+}
+
+function reactivationTemplateName(attempt: 1 | 2): string {
+  return attempt === 1 ? "lead_reactivation_1" : "lead_reactivation_2";
+}
+
+function reactivationTemplateKind(attempt: 1 | 2): ReactivationTemplateKind {
+  return attempt === 1 ? "reactivation_1" : "reactivation_2";
 }
 
 function formatAppointmentTime(appointmentTime: Date, timezone: string): string {
