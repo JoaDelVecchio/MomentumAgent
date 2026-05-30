@@ -1,11 +1,13 @@
-import type { Appointment, ClinicProfile, Service } from "../../domain/types.js";
+import type { Appointment } from "../../domain/types.js";
 import type { AuditLogPort } from "../../ports/audit-log.js";
 import { CalendarInfrastructureError } from "../../ports/calendar.js";
 import type { Conversation, OperationalRepository, PendingBooking } from "../../ports/repositories.js";
 import type { SchedulingService } from "../scheduling/scheduling-service.js";
+import { buildFaqResponse } from "./faq-response.js";
 import type { ConversationInterpreter } from "./interpreter.js";
 import { normalizeText } from "./intent.js";
 import { RulesConversationInterpreter } from "./rules-interpreter.js";
+import { findService, formatServiceList } from "./service-matching.js";
 
 type InboundMessage = {
   clinicId: string;
@@ -71,15 +73,8 @@ export class ConversationWorkflow {
       }
     });
 
-    if (intent.intent === "handoff") {
-      const conversation = await this.repos.getConversation({
-        clinicId: input.clinicId,
-        conversationId: input.conversationId
-      });
-      if (conversation) {
-        await this.repos.saveConversation({ ...conversation, botPaused: true, updatedAt: new Date() });
-      }
-      return { kind: "handoff", text: "Te derivo con recepcion para que puedan ayudarte por este mismo chat." };
+    if (intent.requiresHuman || intent.intent === "medical_safety" || intent.intent === "handoff") {
+      return await this.pauseForHandoff(input);
     }
 
     if (intent.intent === "book") {
@@ -100,10 +95,28 @@ export class ConversationWorkflow {
       return await this.handleRescheduleIntent(input);
     }
 
+    if (intent.intent === "question") {
+      const faq = buildFaqResponse(await this.repos.getClinicProfile(input.clinicId), intent);
+      if (faq) {
+        return { kind: "reply", text: faq };
+      }
+    }
+
     return {
       kind: "reply",
       text: "Te ayudo con informacion y turnos. Decime que tratamiento te interesa o si queres reservar, cancelar o cambiar un turno."
     };
+  }
+
+  private async pauseForHandoff(input: InboundMessage): Promise<WorkflowResult> {
+    const conversation = await this.repos.getConversation({
+      clinicId: input.clinicId,
+      conversationId: input.conversationId
+    });
+    if (conversation) {
+      await this.repos.saveConversation({ ...conversation, botPaused: true, updatedAt: new Date() });
+    }
+    return { kind: "handoff", text: "Te derivo con recepcion para que puedan ayudarte por este mismo chat." };
   }
 
   private async upsertPatient(input: InboundMessage) {
@@ -370,31 +383,6 @@ function looksLikeFullName(text: string) {
 function normalizeFullName(text: string) {
   const normalized = text.replace(/[^\p{L}\s'-]/gu, " ").replace(/\s+/g, " ").trim();
   return normalized.length >= 5 ? normalized : undefined;
-}
-
-function findService(profile: ClinicProfile, serviceName: string): Service | undefined {
-  const normalizedServiceName = normalizeText(serviceName);
-  if (!normalizedServiceName) {
-    return undefined;
-  }
-
-  return profile.services.find((service) => {
-    const normalizedCandidate = normalizeText(service.name);
-    return (
-      normalizedCandidate === normalizedServiceName ||
-      normalizedCandidate.includes(normalizedServiceName) ||
-      normalizedServiceName.includes(normalizedCandidate) ||
-      matchesKnownAlias(normalizedCandidate, normalizedServiceName)
-    );
-  });
-}
-
-function formatServiceList(profile: ClinicProfile) {
-  return profile.services.map((service) => service.name).join(", ");
-}
-
-function matchesKnownAlias(normalizedCandidate: string, normalizedServiceName: string) {
-  return normalizedCandidate === "botox" && normalizedServiceName.includes("toxina");
 }
 
 function startOfDay(date: Date) {
