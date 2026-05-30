@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { InMemoryCalendarCredentialRepository } from "../src/adapters/memory/calendar-auth-repository.js";
 import {
   GoogleCalendarOnboardingService,
-  googleCalendarConnectionStatus
+  googleCalendarConnectionStatus,
+  hasUsableProfessionalCalendarMappings
 } from "../src/application/onboarding/google-calendar-onboarding-service.js";
 import { GOOGLE_CALENDAR_SCOPES } from "../src/config/google-calendar.js";
+import type { ClinicProfile } from "../src/domain/types.js";
 
 const calendarListScope = "https://www.googleapis.com/auth/calendar.calendarlist.readonly";
 
@@ -95,6 +97,27 @@ describe("GoogleCalendarOnboardingService", () => {
         requiredScopes: [...GOOGLE_CALENDAR_SCOPES]
       }).reconnectRequired
     ).toBe(false);
+  });
+
+  it("requires at least one service before professional calendar mappings are usable", () => {
+    const mappedProfile: ClinicProfile = {
+      clinicId: "clinic_empty_services",
+      name: "Clinica Demo",
+      timezone: "America/Argentina/Buenos_Aires",
+      services: [],
+      professionals: [
+        {
+          id: "pro_perez",
+          name: "Dra. Perez",
+          calendarId: "cal_perez",
+          workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
+        }
+      ],
+      appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 1440, bufferMinutes: 0 },
+      requiredPatientFields: ["fullName"]
+    };
+
+    expect(hasUsableProfessionalCalendarMappings(mappedProfile)).toBe(false);
   });
 });
 

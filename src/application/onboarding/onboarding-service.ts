@@ -213,11 +213,13 @@ export class OnboardingService {
   }
 
   async isClinicActive(clinicId: Id): Promise<boolean> {
-    const [active, profile] = await Promise.all([
+    const [active, setup, profile, googleCredentials] = await Promise.all([
       this.options.onboarding.isClinicActive(clinicId),
-      this.options.operational.getClinicProfile(clinicId)
+      this.options.onboarding.getClinicSetup(clinicId),
+      this.options.operational.getClinicProfile(clinicId),
+      this.options.calendarCredentials?.get({ clinicId, provider: "google" })
     ]);
-    return active && isCompleteOperationalProfile(profile);
+    return active && isCompleteOperationalProfile(profile) && this.isCalendarReady(setup, profile, googleCredentials);
   }
 
   private async requireSetup(clinicId: Id): Promise<ClinicSetupRecord> {
@@ -240,9 +242,12 @@ export class OnboardingService {
     if (!this.options.calendarCredentials) {
       return Boolean(setup?.calendarConnected);
     }
+    if (!this.options.calendarRequiredScopes?.length) {
+      return false;
+    }
     const status = googleCalendarConnectionStatus({
       credentials: googleCredentials,
-      requiredScopes: this.options.calendarRequiredScopes ?? []
+      requiredScopes: this.options.calendarRequiredScopes
     });
     return status.connected && !status.reconnectRequired && hasUsableProfessionalCalendarMappings(profile);
   }

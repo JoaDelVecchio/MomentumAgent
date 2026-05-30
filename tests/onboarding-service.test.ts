@@ -176,6 +176,49 @@ describe("OnboardingService", () => {
     });
   });
 
+  it("keeps calendar readiness missing in Google mode when required scopes are not configured", async () => {
+    const context = buildContext();
+    const credentials = new InMemoryCalendarCredentialRepository();
+    const service = new OnboardingService({
+      onboarding: context.onboarding,
+      operational: context.operational,
+      calendarCredentials: credentials,
+      now: () => new Date("2026-06-01T12:00:00.000Z")
+    });
+    await service.createManualClinic({
+      clinicId: "clinic_1",
+      clinicName: "Clinica Demo",
+      primaryContactName: "Ana Manager",
+      primaryContactPhone: "+5491111111111",
+      city: "Buenos Aires",
+      country: "Argentina",
+      source: "presencial",
+      now: new Date("2026-06-01T12:00:00.000Z")
+    });
+    await service.updatePaymentStatus({ clinicId: "clinic_1", paymentStatus: "trial" });
+    await service.updateReadinessFlags({
+      clinicId: "clinic_1",
+      whatsappReady: true,
+      calendarConnected: true,
+      testConversationPassed: true,
+      activationChecklistCompleted: true
+    });
+    await service.saveClinicProfile(profile("clinic_1"));
+    await credentials.save({
+      clinicId: "clinic_1",
+      provider: "google",
+      scopes: [...GOOGLE_CALENDAR_SCOPES],
+      accessToken: "access_token",
+      refreshToken: "refresh_token"
+    });
+
+    await expect(service.readiness("clinic_1")).resolves.toEqual({
+      clinicId: "clinic_1",
+      ready: false,
+      missing: ["calendar"]
+    });
+  });
+
   it("rejects duplicate professional calendar mappings in Google readiness mode", async () => {
     const context = buildContext();
     const credentials = new InMemoryCalendarCredentialRepository();
@@ -352,6 +395,51 @@ describe("OnboardingService", () => {
     await expect(context.service.isClinicActive("clinic_1")).resolves.toBe(true);
   });
 
+  it("requires Google credentials before reporting an already-active clinic active in Google mode", async () => {
+    const context = buildGoogleContext();
+    await makeReadyActiveClinic(context.service, context.onboarding);
+
+    await expect(context.onboarding.isClinicActive("clinic_1")).resolves.toBe(true);
+    await expect(context.service.isClinicActive("clinic_1")).resolves.toBe(false);
+  });
+
+  it("reports an already-active clinic active in Google mode after credentials, scopes, and mappings are valid", async () => {
+    const context = buildGoogleContext();
+    await makeReadyActiveClinic(context.service, context.onboarding);
+    await context.credentials.save({
+      clinicId: "clinic_1",
+      provider: "google",
+      scopes: [...GOOGLE_CALENDAR_SCOPES],
+      accessToken: "access_token",
+      refreshToken: "refresh_token"
+    });
+
+    await expect(context.service.isClinicActive("clinic_1")).resolves.toBe(true);
+  });
+
+  it("rejects duplicate Google calendar mappings before reporting an already-active clinic active", async () => {
+    const context = buildGoogleContext();
+    await makeReadyActiveClinic(context.service, context.onboarding);
+    await context.credentials.save({
+      clinicId: "clinic_1",
+      provider: "google",
+      scopes: [...GOOGLE_CALENDAR_SCOPES],
+      accessToken: "access_token",
+      refreshToken: "refresh_token"
+    });
+    await context.service.saveClinicProfile({
+      ...profile("clinic_1"),
+      professionals: [
+        { ...profile("clinic_1").professionals[0], id: "pro_perez", calendarId: "shared_calendar" },
+        { ...profile("clinic_1").professionals[0], id: "pro_gomez", name: "Dra. Gomez", calendarId: "shared_calendar" }
+      ],
+      services: [{ ...profile("clinic_1").services[0], professionalIds: ["pro_perez", "pro_gomez"] }]
+    });
+
+    await expect(context.onboarding.isClinicActive("clinic_1")).resolves.toBe(true);
+    await expect(context.service.isClinicActive("clinic_1")).resolves.toBe(false);
+  });
+
   it("requires an existing setup before updating payment status", async () => {
     const context = buildContext();
 
@@ -395,6 +483,55 @@ function buildContext() {
     now: () => new Date("2026-06-01T12:00:00.000Z")
   });
   return { onboarding, operational, service };
+}
+
+function buildGoogleContext() {
+  const onboarding = new InMemoryOnboardingRepository();
+  const operational = new InMemoryRepositories();
+  const credentials = new InMemoryCalendarCredentialRepository();
+  const service = new OnboardingService({
+    onboarding,
+    operational,
+    calendarCredentials: credentials,
+    calendarRequiredScopes: [...GOOGLE_CALENDAR_SCOPES],
+    now: () => new Date("2026-06-01T12:00:00.000Z")
+  });
+  return { onboarding, operational, credentials, service };
+}
+
+async function makeReadyActiveClinic(
+  service: OnboardingService,
+  onboarding: InMemoryOnboardingRepository
+): Promise<void> {
+  await service.createManualClinic({
+    clinicId: "clinic_1",
+    clinicName: "Clinica Demo",
+    primaryContactName: "Ana Manager",
+    primaryContactPhone: "+5491111111111",
+    city: "Buenos Aires",
+    country: "Argentina",
+    source: "presencial",
+    now: new Date("2026-06-01T12:00:00.000Z")
+  });
+  await service.saveClinicProfile(profile("clinic_1"));
+  await service.updatePaymentStatus({
+    clinicId: "clinic_1",
+    paymentStatus: "trial",
+    now: new Date("2026-06-01T12:01:00.000Z")
+  });
+  await service.updateReadinessFlags({
+    clinicId: "clinic_1",
+    whatsappReady: true,
+    calendarConnected: true,
+    testConversationPassed: true,
+    activationChecklistCompleted: true,
+    now: new Date("2026-06-01T12:02:00.000Z")
+  });
+  await onboarding.updateClinicLifecycle({
+    clinicId: "clinic_1",
+    lifecycleState: "active",
+    updatedAt: new Date("2026-06-01T12:03:00.000Z")
+  });
 }
 
 function profile(clinicId: string) {

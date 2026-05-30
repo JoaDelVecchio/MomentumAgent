@@ -99,6 +99,9 @@ export function hasUsableProfessionalCalendarMappings(profile: ClinicProfile | u
   if (!profile) {
     return false;
   }
+  if (profile.services.length === 0) {
+    return false;
+  }
   const calendarIds = profile.professionals
     .map((professional) => professional.calendarId.trim())
     .filter((calendarId) => calendarId.length > 0);
