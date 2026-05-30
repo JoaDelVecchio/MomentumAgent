@@ -28,7 +28,7 @@ The files in this repo provide project-level workflow guidance, but they do not 
 The repository contains the first local backend slice for the Momentum MVP:
 
 - clinic profile validation;
-- fake calendar source-of-truth;
+- fake calendar source-of-truth plus Google Calendar OAuth/provider wiring;
 - scheduling workflows for booking, rescheduling, and cancellation;
 - WhatsApp-style conversation workflow;
 - outbound policies for reminders, reactivation, and freed-slot matching;
@@ -76,3 +76,48 @@ curl -sS -X POST http://127.0.0.1:3000/simulate/inbound-message \
   -H 'content-type: application/json' \
   -d '{"clinicId":"clinic_1","conversationId":"conv_1","patientId":"pat_1","whatsappNumber":"+5491111111111","text":"Quiero reservar botox"}'
 ```
+
+## Google Calendar Local Setup
+
+Default local behavior uses the fake calendar:
+
+```bash
+CALENDAR_PROVIDER=fake ENABLE_SIMULATION_API=true npm run dev
+```
+
+To run with Google Calendar:
+
+1. Create a Google Cloud OAuth client for a web application.
+2. Add this redirect URI to the OAuth client:
+
+```text
+http://127.0.0.1:3000/integrations/google-calendar/callback
+```
+
+3. Set these env vars in `.env`:
+
+```bash
+CALENDAR_PROVIDER=google
+ENABLE_SIMULATION_API=true
+GOOGLE_CALENDAR_CLIENT_ID="..."
+GOOGLE_CALENDAR_CLIENT_SECRET="..."
+GOOGLE_CALENDAR_REDIRECT_URI="http://127.0.0.1:3000/integrations/google-calendar/callback"
+GOOGLE_CALENDAR_SETUP_TOKEN="local-setup-token"
+TOKEN_ENCRYPTION_KEY="<32-byte base64 or 64-char hex key>"
+```
+
+4. Start the API and open:
+
+```text
+http://127.0.0.1:3000/integrations/google-calendar/start?clinicId=clinic_1&setupToken=local-setup-token
+```
+
+5. Complete Google consent. Momentum stores encrypted OAuth credentials in Prisma.
+6. Set the seeded professional `calendarId` in `src/dev/seed.ts` to the real Google calendar id you want to test.
+7. Use `/simulate/inbound-message` to request, confirm, reschedule, or cancel a booking.
+8. Verify the event appears, moves, or disappears in Google Calendar.
+
+Required calendar scopes:
+
+- `https://www.googleapis.com/auth/calendar.events`
+- `https://www.googleapis.com/auth/calendar.events.freebusy`
