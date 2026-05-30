@@ -189,7 +189,11 @@ export class OnboardingService {
   }
 
   async isClinicActive(clinicId: Id): Promise<boolean> {
-    return this.options.onboarding.isClinicActive(clinicId);
+    const [active, profile] = await Promise.all([
+      this.options.onboarding.isClinicActive(clinicId),
+      this.options.operational.getClinicProfile(clinicId)
+    ]);
+    return active && Boolean(profile);
   }
 
   private async requireSetup(clinicId: Id): Promise<ClinicSetupRecord> {

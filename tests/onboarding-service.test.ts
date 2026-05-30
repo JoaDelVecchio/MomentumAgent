@@ -156,6 +156,45 @@ describe("OnboardingService", () => {
     await expect(context.service.isClinicActive("clinic_1")).resolves.toBe(false);
   });
 
+  it("requires a saved clinic profile before reporting a clinic active", async () => {
+    const context = buildContext();
+    await context.service.createManualClinic({
+      clinicId: "clinic_1",
+      clinicName: "Clinica Demo",
+      primaryContactName: "Ana Manager",
+      primaryContactPhone: "+5491111111111",
+      city: "Buenos Aires",
+      country: "Argentina",
+      source: "presencial",
+      now: new Date("2026-06-01T12:00:00.000Z")
+    });
+    await context.service.updatePaymentStatus({
+      clinicId: "clinic_1",
+      paymentStatus: "paid",
+      now: new Date("2026-06-01T12:01:00.000Z")
+    });
+    await context.service.updateReadinessFlags({
+      clinicId: "clinic_1",
+      whatsappReady: true,
+      calendarConnected: true,
+      testConversationPassed: true,
+      activationChecklistCompleted: true,
+      now: new Date("2026-06-01T12:02:00.000Z")
+    });
+    await context.onboarding.updateClinicLifecycle({
+      clinicId: "clinic_1",
+      lifecycleState: "active",
+      updatedAt: new Date("2026-06-01T12:03:00.000Z")
+    });
+
+    await expect(context.onboarding.isClinicActive("clinic_1")).resolves.toBe(true);
+    await expect(context.service.isClinicActive("clinic_1")).resolves.toBe(false);
+
+    await context.service.saveClinicProfile(profile("clinic_1"));
+
+    await expect(context.service.isClinicActive("clinic_1")).resolves.toBe(true);
+  });
+
   it("requires an existing setup before updating payment status", async () => {
     const context = buildContext();
 
