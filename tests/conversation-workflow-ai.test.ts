@@ -3,6 +3,7 @@ import { InMemoryAuditLog } from "../src/adapters/memory/audit-log.js";
 import { FakeCalendar } from "../src/adapters/memory/fake-calendar.js";
 import { InMemoryRepositories } from "../src/adapters/memory/repositories.js";
 import { ConversationWorkflow } from "../src/application/conversations/conversation-workflow.js";
+import { buildFaqResponse } from "../src/application/conversations/faq-response.js";
 import type {
   ConversationInterpreter,
   ConversationInterpreterInput,
@@ -71,6 +72,47 @@ class FakeInterpreter implements ConversationInterpreter {
 }
 
 describe("ConversationWorkflow with AI understanding", () => {
+  it("does not return partial service FAQ when a requested configured fact is missing", () => {
+    const profile = parseClinicProfile({
+      clinicId: "clinic_1",
+      name: "Clinica Demo",
+      timezone: "America/Argentina/Buenos_Aires",
+      services: [
+        {
+          id: "svc_botox",
+          name: "Botox",
+          durationMinutes: 30,
+          priceText: "Desde $120.000",
+          preparation: "",
+          restrictions: [],
+          professionalIds: ["pro_perez"]
+        }
+      ],
+      professionals: [{ id: "pro_perez", name: "Dra. Perez", calendarId: "cal_perez" }],
+      appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 0, bufferMinutes: 0 },
+      requiredPatientFields: ["fullName"]
+    });
+
+    expect(
+      buildFaqResponse(
+        profile,
+        understanding({
+          serviceName: "Botox",
+          requestedTopics: ["price", "restrictions"]
+        })
+      )
+    ).toBeUndefined();
+    expect(
+      buildFaqResponse(
+        profile,
+        understanding({
+          serviceName: "Botox",
+          requestedTopics: ["price", "preparation"]
+        })
+      )
+    ).toBeUndefined();
+  });
+
   it("answers service FAQ from configured clinic data only", async () => {
     const { workflow } = buildContext(
       new FakeInterpreter(

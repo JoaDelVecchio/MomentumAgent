@@ -19,12 +19,32 @@ export function buildFaqResponse(
     return undefined;
   }
 
+  if (!hasAllRequestedServiceFacts(service, understanding.requestedTopics)) {
+    return undefined;
+  }
+
   const parts = buildServiceFactParts(service, understanding.requestedTopics);
   if (parts.length === 0) {
     return undefined;
   }
 
   return `${service.name}: ${parts.join(" ")}`;
+}
+
+function hasAllRequestedServiceFacts(service: Service, topics: RequestedTopic[]) {
+  const requested = new Set(topics);
+
+  if (requested.has("price") && !service.priceText.trim()) {
+    return false;
+  }
+  if (requested.has("preparation") && !service.preparation.trim()) {
+    return false;
+  }
+  if (requested.has("restrictions") && service.restrictions.length === 0) {
+    return false;
+  }
+
+  return true;
 }
 
 function buildServiceFactParts(service: Service, topics: RequestedTopic[]) {
