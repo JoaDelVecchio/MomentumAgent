@@ -2,7 +2,6 @@ import type { CalendarSlot } from "../../ports/calendar.js";
 import type { ConversationUnderstanding } from "./interpreter.js";
 
 export function resolveSlotSearchRange(input: {
-  now: Date;
   defaultFrom: Date;
   defaultTo: Date;
   understanding: ConversationUnderstanding;
@@ -16,17 +15,26 @@ export function resolveSlotSearchRange(input: {
     normalized?.to && normalized.to >= input.defaultFrom && normalized.to <= input.defaultTo
       ? normalized.to
       : input.defaultTo;
+  if (from >= to) {
+    return { from: input.defaultFrom, to: input.defaultTo };
+  }
   return { from, to };
 }
 
-export function filterSlotsByDaypart(slots: CalendarSlot[], understanding: ConversationUnderstanding) {
+export function filterSlotsByDaypart(slots: CalendarSlot[], understanding: ConversationUnderstanding, timezone: string) {
   const daypart = understanding.normalizedTimePreference?.daypart;
   if (!daypart) {
     return slots;
   }
 
+  const localHourFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour: "numeric",
+    hour12: false
+  });
+
   return slots.filter((slot) => {
-    const hour = slot.startsAt.getUTCHours();
+    const hour = Number(localHourFormatter.format(slot.startsAt)) % 24;
     if (daypart === "morning") {
       return hour >= 6 && hour < 12;
     }

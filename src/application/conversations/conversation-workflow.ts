@@ -169,7 +169,6 @@ export class ConversationWorkflow {
     const searchFrom = startOfDay(this.now());
     const defaultTo = addDays(searchFrom, 14);
     const range = resolveSlotSearchRange({
-      now: this.now(),
       defaultFrom: searchFrom,
       defaultTo,
       understanding: intent
@@ -182,7 +181,8 @@ export class ConversationWorkflow {
         from: range.from,
         to: range.to
       }),
-      intent
+      intent,
+      profile.timezone
     );
 
     if (slots.length === 0) {

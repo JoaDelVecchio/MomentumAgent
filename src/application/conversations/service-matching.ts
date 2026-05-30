@@ -23,14 +23,22 @@ export function findProfessional(
   professionalPreference: string | null | undefined
 ): Professional | undefined {
   const normalizedPreference = normalizeText(professionalPreference ?? "");
-  if (!normalizedPreference) {
+  const specificPreference = removeProfessionalHonorifics(normalizedPreference);
+  if (!specificPreference || specificPreference.length < 3) {
     return undefined;
   }
 
-  return profile.professionals.find((professional) => {
+  const matches = profile.professionals.filter((professional) => {
     const normalizedName = normalizeText(professional.name);
-    return normalizedName === normalizedPreference || normalizedName.includes(normalizedPreference);
+    const specificName = removeProfessionalHonorifics(normalizedName);
+    return (
+      normalizedName === normalizedPreference ||
+      normalizedName.includes(specificPreference) ||
+      specificName === specificPreference ||
+      specificName.includes(specificPreference)
+    );
   });
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 export function formatServiceList(profile: ClinicProfile) {
@@ -39,4 +47,11 @@ export function formatServiceList(profile: ClinicProfile) {
 
 function matchesKnownAlias(normalizedCandidate: string, normalizedServiceName: string) {
   return normalizedCandidate === "botox" && normalizedServiceName.includes("toxina");
+}
+
+function removeProfessionalHonorifics(normalizedText: string) {
+  return normalizedText
+    .replace(/\b(dra|dr|doctora|doctor|lic|licenciada|licenciado)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
