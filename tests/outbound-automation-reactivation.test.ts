@@ -46,28 +46,153 @@ describe("OutboundAutomationService reactivations", () => {
     expect(context.provider.sentTemplateMessages).toEqual([]);
   });
 
-  it("blocks reactivation for future appointment, opt-out, or handoff pause", async () => {
-    const futureAppointment = buildReactivationContext({
+  it("does not consume the first reactivation key during quiet hours", async () => {
+    const context = buildReactivationContext({
+      conversation: {
+        pendingBooking: pendingBookingFixture(),
+        updatedAt: new Date("2026-06-01T10:00:00.000Z")
+      }
+    });
+
+    const quietHoursSummary = await context.service.runDueReactivations({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T11:30:00.000Z")
+    });
+
+    expect(quietHoursSummary).toEqual({ sent: 0, blocked: 1, failed: 0, skipped: 0 });
+    expect(context.provider.sentTemplateMessages).toEqual([]);
+    expect(await context.repos.getOutboundDelivery("reactivation:conv_1:1")).toBeUndefined();
+
+    const allowedHoursSummary = await context.service.runDueReactivations({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:00:00.000Z")
+    });
+
+    expect(allowedHoursSummary).toEqual({ sent: 1, blocked: 0, failed: 0, skipped: 0 });
+    expect(context.provider.sentTemplateMessages).toEqual([
+      expect.objectContaining({
+        templateName: "lead_reactivation_1"
+      })
+    ]);
+    expect(await context.repos.getOutboundDelivery("reactivation:conv_1:1")).toEqual(
+      expect.objectContaining({
+        status: "sent",
+        conversationId: "conv_1",
+        patientId: "pat_1"
+      })
+    );
+  });
+
+  it("does not consume the first reactivation key while handoff is paused", async () => {
+    const context = buildReactivationContext({
+      conversation: {
+        botPaused: true,
+        pendingBooking: pendingBookingFixture(),
+        updatedAt: new Date("2026-06-01T10:00:00.000Z")
+      }
+    });
+
+    const pausedSummary = await context.service.runDueReactivations({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:00:00.000Z")
+    });
+
+    expect(pausedSummary).toEqual({ sent: 0, blocked: 1, failed: 0, skipped: 0 });
+    expect(context.provider.sentTemplateMessages).toEqual([]);
+    expect(await context.repos.getOutboundDelivery("reactivation:conv_1:1")).toBeUndefined();
+
+    context.repos.saveConversation({
+      id: "conv_1",
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      botPaused: false,
+      pendingBooking: pendingBookingFixture(),
+      createdAt: new Date("2026-05-30T10:00:00.000Z"),
+      updatedAt: new Date("2026-06-01T10:00:00.000Z")
+    });
+
+    const resumedSummary = await context.service.runDueReactivations({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:01:00.000Z")
+    });
+
+    expect(resumedSummary).toEqual({ sent: 1, blocked: 0, failed: 0, skipped: 0 });
+    expect(context.provider.sentTemplateMessages).toEqual([
+      expect.objectContaining({
+        templateName: "lead_reactivation_1"
+      })
+    ]);
+  });
+
+  it("only blocks reactivation for future appointments in the same clinic", async () => {
+    const otherClinicAppointment = buildReactivationContext({
+      conversation: { pendingBooking: pendingBookingFixture() },
+      appointment: appointmentFixture({
+        id: "appt_other_clinic",
+        clinicId: "clinic_2",
+        startsAt: new Date("2026-06-10T12:00:00.000Z")
+      })
+    });
+
+    const otherClinicSummary = await otherClinicAppointment.service.runDueReactivations({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:00:00.000Z")
+    });
+
+    expect(otherClinicSummary).toEqual({ sent: 1, blocked: 0, failed: 0, skipped: 0 });
+    expect(otherClinicAppointment.provider.sentTemplateMessages).toEqual([
+      expect.objectContaining({
+        templateName: "lead_reactivation_1"
+      })
+    ]);
+
+    const sameClinicAppointment = buildReactivationContext({
       conversation: { pendingBooking: pendingBookingFixture() },
       appointment: appointmentFixture({ startsAt: new Date("2026-06-10T12:00:00.000Z") })
     });
+
+    const sameClinicSummary = await sameClinicAppointment.service.runDueReactivations({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:00:00.000Z")
+    });
+
+    expect(sameClinicSummary).toEqual({ sent: 0, blocked: 1, failed: 0, skipped: 0 });
+    expect(sameClinicAppointment.provider.sentTemplateMessages).toEqual([]);
+    expect(await sameClinicAppointment.repos.getOutboundDelivery("reactivation:conv_1:1")).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        failureReason: "future_appointment"
+      })
+    );
+
+    const duplicateSummary = await sameClinicAppointment.service.runDueReactivations({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:01:00.000Z")
+    });
+
+    expect(duplicateSummary).toEqual({ sent: 0, blocked: 0, failed: 0, skipped: 1 });
+  });
+
+  it("blocks reactivation for opt-out", async () => {
     const optedOut = buildReactivationContext({
       conversation: { pendingBooking: pendingBookingFixture() }
     });
+
     optedOut.repos.markOptOut("+5491111111111");
-    const paused = buildReactivationContext({
-      conversation: { botPaused: true, pendingBooking: pendingBookingFixture() }
+
+    const summary = await optedOut.service.runDueReactivations({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:00:00.000Z")
     });
 
-    for (const context of [futureAppointment, optedOut, paused]) {
-      const summary = await context.service.runDueReactivations({
-        clinicId: "clinic_1",
-        now: new Date("2026-06-02T12:00:00.000Z")
-      });
-
-      expect(summary).toEqual({ sent: 0, blocked: 1, failed: 0, skipped: 0 });
-      expect(context.provider.sentTemplateMessages).toEqual([]);
-    }
+    expect(summary).toEqual({ sent: 0, blocked: 1, failed: 0, skipped: 0 });
+    expect(optedOut.provider.sentTemplateMessages).toEqual([]);
+    expect(await optedOut.repos.getOutboundDelivery("reactivation:conv_1:1")).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        failureReason: "opt_out"
+      })
+    );
   });
 
   it("sends second attempt after seven days and then stops", async () => {

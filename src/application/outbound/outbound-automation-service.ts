@@ -31,7 +31,8 @@ type ReminderBlockReason =
   | "missing_service";
 
 type ReminderTemplateKind = "reminder_72h" | "reminder_24h" | "reminder_same_day";
-type ReactivationBlockReason = "missing_patient" | "missing_service" | "opt_out" | "handoff_paused" | "future_appointment";
+type ReactivationBlockReason = "missing_patient" | "missing_service" | "opt_out" | "future_appointment";
+type TemporaryReactivationBlockReason = "quiet_hours" | "handoff_paused";
 type OutboundBlockReason = ReminderBlockReason | ReactivationBlockReason;
 type ReactivationTemplateKind = "reactivation_1" | "reactivation_2";
 
@@ -123,6 +124,33 @@ export class OutboundAutomationService {
 
     const patient = await this.options.repos.getPatient(input.conversation.patientId);
     const service = input.profile.services.find((candidate) => candidate.id === pendingBooking.serviceId);
+
+    if (
+      patient &&
+      service &&
+      !(await this.options.repos.isOptedOut(patient.whatsappNumber)) &&
+      !(await this.patientHasFutureScheduledAppointment({
+        clinicId: input.conversation.clinicId,
+        patientId: patient.id,
+        now: input.now
+      }))
+    ) {
+      const temporaryBlockReason = await this.temporaryReactivationBlockReason({
+        conversation: input.conversation,
+        profile: input.profile,
+        now: input.now
+      });
+      if (temporaryBlockReason) {
+        input.summary.blocked += 1;
+        await this.auditTemporaryReactivationBlock({
+          conversation: input.conversation,
+          patient,
+          reason: temporaryBlockReason
+        });
+        return;
+      }
+    }
+
     const claim = await this.options.repos.claimOutboundDelivery({
       key: reactivationDeliveryKey(input.conversation.id, input.attempt),
       clinicId: input.conversation.clinicId,
@@ -384,17 +412,44 @@ export class OutboundAutomationService {
       return "opt_out";
     }
 
+    if (
+      await this.patientHasFutureScheduledAppointment({
+        clinicId: input.conversation.clinicId,
+        patientId: input.patient.id,
+        now: input.now
+      })
+    ) {
+      return "future_appointment";
+    }
+
+    return undefined;
+  }
+
+  private async patientHasFutureScheduledAppointment(input: {
+    clinicId: string;
+    patientId: string;
+    now: Date;
+  }): Promise<boolean> {
+    const appointments = await this.options.repos.listAppointmentsByPatient(input.patientId);
+    return appointments.some(
+      (appointment) =>
+        appointment.clinicId === input.clinicId &&
+        appointment.status === "scheduled" &&
+        appointment.startsAt.getTime() > input.now.getTime()
+    );
+  }
+
+  private async temporaryReactivationBlockReason(input: {
+    conversation: Conversation;
+    profile: ClinicProfile;
+    now: Date;
+  }): Promise<TemporaryReactivationBlockReason | undefined> {
     if (input.conversation.botPaused) {
       return "handoff_paused";
     }
 
-    const appointments = await this.options.repos.listAppointmentsByPatient(input.patient.id);
-    if (
-      appointments.some(
-        (appointment) => appointment.status === "scheduled" && appointment.startsAt.getTime() > input.now.getTime()
-      )
-    ) {
-      return "future_appointment";
+    if (isInsideQuietHours({ now: input.now, timezone: input.profile.timezone })) {
+      return "quiet_hours";
     }
 
     return undefined;
@@ -505,6 +560,23 @@ export class OutboundAutomationService {
       });
     } catch {
       // Quiet-hours blocks are temporary and must not consume the delivery key.
+    }
+  }
+
+  private async auditTemporaryReactivationBlock(input: {
+    conversation: Conversation;
+    patient: Patient;
+    reason: TemporaryReactivationBlockReason;
+  }): Promise<void> {
+    try {
+      await this.auditBlocked({
+        clinicId: input.conversation.clinicId,
+        conversationId: input.conversation.id,
+        patientId: input.patient.id,
+        reason: input.reason
+      });
+    } catch {
+      // Temporary reactivation blocks must not consume the delivery key.
     }
   }
 
