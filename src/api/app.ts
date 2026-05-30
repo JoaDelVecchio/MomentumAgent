@@ -7,6 +7,10 @@ import {
   registerOutboundAutomationRoutes,
   type OutboundAutomationRoutesOptions
 } from "./outbound-routes.js";
+import {
+  registerOnboardingRoutes,
+  type OnboardingRoutesOptions
+} from "./onboarding-routes.js";
 import { registerRoutes } from "./routes.js";
 import { registerWhatsAppRoutes, type WhatsAppKapsoWebhookRoutesOptions } from "./whatsapp-routes.js";
 
@@ -19,6 +23,7 @@ type BuildAppOptions = {
   googleCalendarSetupToken?: string;
   whatsappKapsoWebhook?: WhatsAppKapsoWebhookRoutesOptions;
   outboundAutomation?: OutboundAutomationRoutesOptions;
+  onboarding?: OnboardingRoutesOptions;
 };
 
 export function buildApp(options: BuildAppOptions = {}) {
@@ -52,6 +57,10 @@ export function buildApp(options: BuildAppOptions = {}) {
 
   if (options.outboundAutomation) {
     registerOutboundAutomationRoutes(app, options.outboundAutomation);
+  }
+
+  if (options.onboarding) {
+    registerOnboardingRoutes(app, options.onboarding);
   }
 
   return app;

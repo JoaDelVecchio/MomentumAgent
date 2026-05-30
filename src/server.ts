@@ -1,6 +1,10 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
+import { PrismaOnboardingRepository } from "./adapters/prisma/onboarding-repository.js";
+import { PrismaOperationalRepository } from "./adapters/prisma/operational-repository.js";
 import { buildApp } from "./api/app.js";
+import { OnboardingService } from "./application/onboarding/onboarding-service.js";
+import { readAdminConfig } from "./config/admin.js";
 import { readOutboundConfig } from "./config/outbound.js";
 import { readWhatsAppConfig } from "./config/whatsapp.js";
 import type { CalendarProvider } from "./dev/seed.js";
@@ -15,8 +19,11 @@ const host = process.env.HOST ?? "127.0.0.1";
 const calendarProvider = readCalendarProvider(process.env.CALENDAR_PROVIDER);
 const whatsappConfig = readWhatsAppConfig(process.env);
 const outboundConfig = readOutboundConfig(process.env);
+const adminConfig = readAdminConfig(process.env);
 const sharedPrisma =
-  calendarProvider === "google" || whatsappConfig.provider === "kapso" ? new PrismaClient() : undefined;
+  calendarProvider === "google" || whatsappConfig.provider === "kapso" || adminConfig.enabled
+    ? new PrismaClient()
+    : undefined;
 const googleRuntime =
   calendarProvider === "google" ? await buildGoogleCalendarRuntime({ prisma: requirePrisma(sharedPrisma) }) : undefined;
 const whatsappRuntime =
@@ -29,6 +36,12 @@ const whatsappRuntime =
         clinicId: readRuntimeClinicId(process.env)
       })
     : undefined;
+const onboardingService = adminConfig.enabled
+  ? new OnboardingService({
+      onboarding: new PrismaOnboardingRepository(requireOnboardingPrisma(sharedPrisma)),
+      operational: new PrismaOperationalRepository(requireOnboardingPrisma(sharedPrisma))
+    })
+  : undefined;
 
 const app = buildApp({
   enableSimulationRoutes: process.env.ENABLE_SIMULATION_API === "true",
@@ -40,6 +53,10 @@ const app = buildApp({
   outboundAutomation:
     outboundConfig.enabled && whatsappRuntime
       ? { token: outboundConfig.token, service: whatsappRuntime.outboundAutomation }
+      : undefined,
+  onboarding:
+    adminConfig.enabled && onboardingService
+      ? { adminToken: adminConfig.token, service: onboardingService }
       : undefined
 });
 
@@ -62,6 +79,13 @@ async function shutdown() {
 function requirePrisma(prisma: PrismaClient | undefined): PrismaClient {
   if (!prisma) {
     throw new Error("Prisma runtime was not initialized");
+  }
+  return prisma;
+}
+
+function requireOnboardingPrisma(prisma: PrismaClient | undefined): PrismaClient {
+  if (!prisma) {
+    throw new Error("Prisma runtime is required when onboarding routes are enabled");
   }
   return prisma;
 }

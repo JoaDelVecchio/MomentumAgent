@@ -67,6 +67,10 @@ export class OnboardingService {
     });
   }
 
+  async listLeads(): Promise<ClinicLeadRecord[]> {
+    return this.options.onboarding.listLeads();
+  }
+
   async createManualClinic(input: CreateManualClinicInput): Promise<ClinicSetupRecord> {
     return this.options.onboarding.upsertClinicSetup({
       clinicId: input.clinicId,
@@ -110,6 +114,14 @@ export class OnboardingService {
     });
     await this.options.onboarding.markLeadConverted({ leadId: lead.id, clinicId: input.clinicId, updatedAt });
     return setup;
+  }
+
+  async listClinicSetups(): Promise<ClinicSetupRecord[]> {
+    return this.options.onboarding.listClinicSetups();
+  }
+
+  async getClinicSetup(clinicId: Id): Promise<ClinicSetupRecord | undefined> {
+    return this.options.onboarding.getClinicSetup(clinicId);
   }
 
   async saveClinicProfile(profile: ClinicProfile): Promise<void> {
