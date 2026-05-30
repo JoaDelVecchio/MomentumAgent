@@ -224,3 +224,29 @@ curl -sS -X POST http://127.0.0.1:3000/internal/outbound/run \
 ```
 
 Every outbound send is guarded by opt-out state, handoff pause, quiet hours, durable delivery keys, and audit logging.
+
+## Public Landing And Clinic Onboarding Local Setup
+
+Momentum includes a public landing page and a private onboarding flow for assisted clinic activation.
+
+Start the API:
+
+```bash
+MOMENTUM_ADMIN_TOKEN="local-admin-token" ENABLE_SIMULATION_API=true npm run dev:api
+```
+
+Start the web app:
+
+```bash
+NEXT_PUBLIC_API_BASE_URL="http://127.0.0.1:3000" npm run dev:web
+```
+
+Open:
+
+- `http://127.0.0.1:3001` for the public landing.
+- `http://127.0.0.1:3001/lead` for lead capture.
+- `http://127.0.0.1:3001/internal/onboarding` for private onboarding.
+
+Use `local-admin-token` in the private onboarding screen.
+
+Clinic production WhatsApp and outbound automation remain disabled until the clinic is marked active.
