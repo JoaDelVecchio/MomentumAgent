@@ -182,21 +182,34 @@ describe("server runtime persistence wiring", () => {
 });
 
 describe("server startup runtime decisions", () => {
-  it("requires onboarding runtime for production automation even when admin routes are disabled", () => {
+  it("requires onboarding runtime when admin routes are enabled", () => {
+    expect(
+      needsOnboardingRuntime({
+        adminEnabled: true,
+        whatsappProvider: "disabled",
+        outboundAutomationEnabled: false
+      })
+    ).toBe(true);
+  });
+
+  it("requires onboarding runtime for Kapso production automation even when admin routes are disabled", () => {
     expect(
       needsOnboardingRuntime({
         adminEnabled: false,
         whatsappProvider: "kapso",
-        outboundAutomationEnabled: false
+        outboundAutomationEnabled: true
       })
     ).toBe(true);
+  });
+
+  it("does not require onboarding runtime when only outbound token is configured without WhatsApp runtime", () => {
     expect(
       needsOnboardingRuntime({
         adminEnabled: false,
         whatsappProvider: "disabled",
         outboundAutomationEnabled: true
       })
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("does not require onboarding runtime when only simulation or Google runtime is enabled", () => {

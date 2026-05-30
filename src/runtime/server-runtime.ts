@@ -144,7 +144,7 @@ export function needsOnboardingRuntime(input: {
   whatsappProvider: WhatsAppConfig["provider"];
   outboundAutomationEnabled: boolean;
 }) {
-  return input.adminEnabled || input.whatsappProvider === "kapso" || input.outboundAutomationEnabled;
+  return input.adminEnabled || input.whatsappProvider === "kapso";
 }
 
 class SeedingCalendarCredentialRepository implements CalendarCredentialRepository {
