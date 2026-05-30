@@ -37,6 +37,18 @@ describe("outbound policies", () => {
     expect(shouldSendReminder({ now: new Date("2026-06-10T04:01:00.000Z"), appointmentTime })).toBe("none");
   });
 
+  it("includes the 24h reminder late-window lower bound after quiet hours", () => {
+    const appointmentTime = new Date("2026-06-03T23:00:00.000Z");
+
+    expect(shouldSendReminder({ now: new Date("2026-06-03T12:00:00.000Z"), appointmentTime })).toBe("24h");
+  });
+
+  it("includes the 72h reminder late-window lower bound after quiet hours", () => {
+    const appointmentTime = new Date("2026-06-05T23:00:00.000Z");
+
+    expect(shouldSendReminder({ now: new Date("2026-06-03T12:00:00.000Z"), appointmentTime })).toBe("72h");
+  });
+
   it("reactivates only prior contacts who did not opt out", () => {
     expect(canReactivate({ hadPriorConversation: true, optedOut: false, previousAttempts: 0 })).toBe(true);
     expect(canReactivate({ hadPriorConversation: false, optedOut: false, previousAttempts: 0 })).toBe(false);

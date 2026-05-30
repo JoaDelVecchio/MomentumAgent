@@ -132,6 +132,32 @@ describe("OutboundAutomationService reminders", () => {
     ]);
   });
 
+  it("sends the 24h reminder at the lower late-window bound after a 20:00 local due time is blocked", async () => {
+    const context = await buildReminderContext({
+      appointmentStartsAt: new Date("2026-06-03T23:00:00.000Z")
+    });
+
+    const quietHoursSummary = await context.service.runDueReminders({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T23:00:00.000Z")
+    });
+
+    expect(quietHoursSummary).toEqual({ sent: 0, blocked: 1, failed: 0, skipped: 0 });
+    expect(await context.repos.getOutboundDelivery("reminder:appt_1:24h")).toBeUndefined();
+
+    const allowedHoursSummary = await context.service.runDueReminders({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-03T12:00:00.000Z")
+    });
+
+    expect(allowedHoursSummary).toEqual({ sent: 1, blocked: 0, failed: 0, skipped: 0 });
+    expect(context.provider.sentTemplateMessages).toEqual([
+      expect.objectContaining({
+        templateName: "appointment_reminder_24h"
+      })
+    ]);
+  });
+
   it("only sends same-day reminders for long-duration services", async () => {
     const longDuration = await buildReminderContext({
       appointmentStartsAt: new Date("2026-06-02T15:00:00.000Z"),

@@ -16,11 +16,11 @@ export function shouldSendReminder(input: ReminderInput): ReminderKind {
   const diffHours = (input.appointmentTime.getTime() - input.now.getTime()) / HOUR_MS;
   const alreadySent = input.alreadySent ?? [];
 
-  if (diffHours > REMINDER_72H_MIN_HOURS && diffHours <= 72 && !alreadySent.includes("72h")) {
+  if (diffHours >= REMINDER_72H_MIN_HOURS && diffHours <= 72 && !alreadySent.includes("72h")) {
     return "72h";
   }
 
-  if (diffHours > REMINDER_24H_MIN_HOURS && diffHours <= 24 && !alreadySent.includes("24h")) {
+  if (diffHours >= REMINDER_24H_MIN_HOURS && diffHours <= 24 && !alreadySent.includes("24h")) {
     return "24h";
   }
 
