@@ -446,6 +446,10 @@ class FakeGoogleCalendarClient implements GoogleCalendarClient {
   readonly updateEventCalls: Array<{ calendarId: string; eventId: string; event: GoogleCalendarEventWriteInput }> = [];
   readonly deleteEventCalls: Array<{ calendarId: string; eventId: string }> = [];
 
+  async listCalendars() {
+    return [];
+  }
+
   async queryFreeBusy(calendarIds: string[], from: Date, to: Date) {
     this.freeBusyCalls.push({ calendarIds, from, to });
     return this.freeBusyResult;
@@ -513,6 +517,10 @@ class FakeGoogleCalendarApi implements GoogleCalendarApi {
     eventId: string;
     requestBody: GoogleCalendarEventWriteInput;
   }> = [];
+
+  calendarList = {
+    list: async () => ({ data: { items: [] } })
+  };
 
   freebusy = {
     query: async () => ({

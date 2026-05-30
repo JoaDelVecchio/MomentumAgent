@@ -42,7 +42,17 @@ export type GoogleCalendarEventWriteInput = {
   };
 };
 
+export type GoogleCalendarSummary = {
+  id: string;
+  summary: string;
+  primary: boolean;
+  accessRole: string;
+  timeZone?: string;
+  bookable: boolean;
+};
+
 export interface GoogleCalendarClient {
+  listCalendars(): Promise<GoogleCalendarSummary[]>;
   queryFreeBusy(
     calendarIds: string[],
     from: Date,
@@ -77,6 +87,17 @@ export type GoogleAuthClient = {
 };
 
 export type GoogleCalendarApi = {
+  calendarList: {
+    list(input: {
+      pageToken?: string;
+      showDeleted: false;
+    }): Promise<{
+      data: {
+        nextPageToken?: string | null;
+        items?: GoogleCalendarApiCalendarListEntry[];
+      };
+    }>;
+  };
   freebusy: {
     query(input: {
       requestBody: {
@@ -118,6 +139,15 @@ export type GoogleCalendarApi = {
   };
 };
 
+export type GoogleCalendarApiCalendarListEntry = {
+  id?: string | null;
+  summary?: string | null;
+  primary?: boolean | null;
+  accessRole?: string | null;
+  timeZone?: string | null;
+  deleted?: boolean | null;
+};
+
 export type GoogleCalendarApiEvent = {
   id?: string | null;
   summary?: string | null;
@@ -142,6 +172,28 @@ export class GoogleCalendarApiClient implements GoogleCalendarClient {
   constructor(private readonly options: GoogleCalendarClientOptions) {
     this.authClient = options.authClient ?? createGoogleAuthClient(options.config);
     this.calendarApi = options.calendarApi ?? createGoogleCalendarApi(this.authClient);
+  }
+
+  async listCalendars() {
+    await this.authorize();
+    const calendars: GoogleCalendarSummary[] = [];
+    let pageToken: string | undefined;
+
+    do {
+      const response = await this.calendarApi.calendarList.list({
+        pageToken,
+        showDeleted: false
+      });
+      for (const item of response.data.items ?? []) {
+        const calendar = toCalendarSummary(item);
+        if (calendar) {
+          calendars.push(calendar);
+        }
+      }
+      pageToken = response.data.nextPageToken ?? undefined;
+    } while (pageToken);
+
+    return calendars;
   }
 
   async queryFreeBusy(calendarIds: string[], from: Date, to: Date) {
@@ -265,6 +317,23 @@ function createGoogleCalendarApi(auth: GoogleAuthClient): GoogleCalendarApi {
     version: "v3",
     auth: auth as OAuth2Client
   }) as unknown as GoogleCalendarApi;
+}
+
+function toCalendarSummary(
+  item: GoogleCalendarApiCalendarListEntry
+): GoogleCalendarSummary | undefined {
+  if (!item.id || !item.summary || item.deleted) {
+    return undefined;
+  }
+  const accessRole = item.accessRole ?? "none";
+  return {
+    id: item.id,
+    summary: item.summary,
+    primary: item.primary === true,
+    accessRole,
+    timeZone: item.timeZone ?? undefined,
+    bookable: accessRole === "owner" || accessRole === "writer"
+  };
 }
 
 function requireEventResource(calendarId: string, event: GoogleCalendarApiEvent) {
