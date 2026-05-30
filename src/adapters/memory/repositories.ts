@@ -19,6 +19,8 @@ export class InMemoryRepositories implements OperationalRepository {
   private processedWebhookDeliveries = new Set<string>();
   private appointmentCounter = 0;
   private appointmentLocks = new Map<Id, Promise<unknown>>();
+  private conversationLocks = new Map<Id, Promise<unknown>>();
+  private webhookDeliveryLocks = new Map<string, Promise<unknown>>();
 
   upsertClinicProfile(profile: ClinicProfile) {
     this.clinicProfiles.set(profile.clinicId, cloneClinicProfile(profile));
@@ -57,24 +59,15 @@ export class InMemoryRepositories implements OperationalRepository {
   }
 
   async withAppointmentLock<T>(appointmentId: Id, operation: () => Promise<T>): Promise<T> {
-    const previous = this.appointmentLocks.get(appointmentId) ?? Promise.resolve();
-    let release: () => void = () => {};
-    const currentLock = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const queuedLock = previous.catch(() => undefined).then(() => currentLock);
+    return withKeyedLock(this.appointmentLocks, appointmentId, operation);
+  }
 
-    this.appointmentLocks.set(appointmentId, queuedLock);
-    await previous.catch(() => undefined);
+  async withConversationLock<T>(conversationId: Id, operation: () => Promise<T>): Promise<T> {
+    return withKeyedLock(this.conversationLocks, conversationId, operation);
+  }
 
-    try {
-      return await operation();
-    } finally {
-      release();
-      if (this.appointmentLocks.get(appointmentId) === queuedLock) {
-        this.appointmentLocks.delete(appointmentId);
-      }
-    }
+  async withWebhookDeliveryLock<T>(idempotencyKey: string, operation: () => Promise<T>): Promise<T> {
+    return withKeyedLock(this.webhookDeliveryLocks, idempotencyKey, operation);
   }
 
   getAppointment(appointmentId: Id) {
@@ -120,6 +113,31 @@ export class InMemoryRepositories implements OperationalRepository {
 
 function deliveryKey(input: string | ProcessedWebhookDeliveryInput) {
   return typeof input === "string" ? input : `${input.provider}:${input.idempotencyKey}`;
+}
+
+async function withKeyedLock<T>(
+  locks: Map<string, Promise<unknown>>,
+  key: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const previous = locks.get(key) ?? Promise.resolve();
+  let release: () => void = () => {};
+  const currentLock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queuedLock = previous.catch(() => undefined).then(() => currentLock);
+
+  locks.set(key, queuedLock);
+  await previous.catch(() => undefined);
+
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (locks.get(key) === queuedLock) {
+      locks.delete(key);
+    }
+  }
 }
 
 function cloneClinicProfile(profile: ClinicProfile): ClinicProfile {

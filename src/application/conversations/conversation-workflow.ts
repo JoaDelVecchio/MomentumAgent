@@ -26,6 +26,10 @@ export class ConversationWorkflow {
   ) {}
 
   async handleInboundMessage(input: InboundMessage): Promise<WorkflowResult> {
+    return this.repos.withConversationLock(input.conversationId, () => this.handleInboundMessageLocked(input));
+  }
+
+  private async handleInboundMessageLocked(input: InboundMessage): Promise<WorkflowResult> {
     await this.upsertPatient(input);
     const conversation = await this.upsertConversation(input);
     if (conversation.botPaused) {

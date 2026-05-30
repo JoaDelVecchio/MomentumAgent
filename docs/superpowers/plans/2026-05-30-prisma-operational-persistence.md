@@ -112,10 +112,13 @@ describe("OperationalRepository port", () => {
     expect((await repos.getConversation("conv_async"))?.pendingBooking).toEqual(
       expect.objectContaining({ serviceId: "svc_botox" })
     );
+    expect(repos.conversationLockCalls).toEqual(["conv_async"]);
   });
 });
 
 class AsyncRepositoryAdapter implements OperationalRepository {
+  readonly conversationLockCalls: string[] = [];
+
   constructor(private readonly inner: InMemoryRepositories) {}
   async upsertClinicProfile(input: Parameters<InMemoryRepositories["upsertClinicProfile"]>[0]) {
     return this.inner.upsertClinicProfile(input);
@@ -144,6 +147,15 @@ class AsyncRepositoryAdapter implements OperationalRepository {
   async withAppointmentLock<T>(appointmentId: string, operation: () => Promise<T>) {
     return this.inner.withAppointmentLock(appointmentId, operation);
   }
+
+  async withConversationLock<T>(conversationId: string, operation: () => Promise<T>) {
+    this.conversationLockCalls.push(conversationId);
+    return this.inner.withConversationLock(conversationId, operation);
+  }
+
+  async withWebhookDeliveryLock<T>(idempotencyKey: string, operation: () => Promise<T>) {
+    return this.inner.withWebhookDeliveryLock(idempotencyKey, operation);
+  }
   async getAppointment(input: string) {
     return this.inner.getAppointment(input);
   }
@@ -165,7 +177,7 @@ class AsyncRepositoryAdapter implements OperationalRepository {
   async hasProcessedWebhookDelivery(input: string) {
     return this.inner.hasProcessedWebhookDelivery(input);
   }
-  async markProcessedWebhookDelivery(input: string) {
+  async markProcessedWebhookDelivery(input: string | ProcessedWebhookDeliveryInput) {
     return this.inner.markProcessedWebhookDelivery(input);
   }
 }
@@ -235,6 +247,8 @@ export interface OperationalRepository {
   saveAppointment(appointment: Appointment): MaybePromise<void>;
   nextAppointmentId(): MaybePromise<Id>;
   withAppointmentLock<T>(appointmentId: Id, operation: () => Promise<T>): Promise<T>;
+  withConversationLock<T>(conversationId: Id, operation: () => Promise<T>): Promise<T>;
+  withWebhookDeliveryLock<T>(idempotencyKey: string, operation: () => Promise<T>): Promise<T>;
   getAppointment(appointmentId: Id): MaybePromise<Appointment | undefined>;
   listAppointmentsByPatient(patientId: Id): MaybePromise<Appointment[]>;
   saveInterest(interest: PatientInterest): MaybePromise<void>;
@@ -266,14 +280,51 @@ export class InMemoryRepositories implements OperationalRepository {
   // keep existing implementation
 }
 
+async function withKeyedLock<T>(
+  locks: Map<string, Promise<unknown>>,
+  key: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const previous = locks.get(key) ?? Promise.resolve();
+  let release: () => void = () => {};
+  const currentLock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queuedLock = previous.catch(() => undefined).then(() => currentLock);
+
+  locks.set(key, queuedLock);
+  await previous.catch(() => undefined);
+
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (locks.get(key) === queuedLock) {
+      locks.delete(key);
+    }
+  }
+}
+
 function deliveryKey(input: string | ProcessedWebhookDeliveryInput) {
   return typeof input === "string" ? input : `${input.provider}:${input.idempotencyKey}`;
 }
 ```
 
-Update `hasProcessedWebhookDelivery()` and `markProcessedWebhookDelivery()` in the same file:
+Update `withAppointmentLock()`, add `withConversationLock()` and `withWebhookDeliveryLock()`, then update `hasProcessedWebhookDelivery()` and `markProcessedWebhookDelivery()` in the same file:
 
 ```ts
+async withAppointmentLock<T>(appointmentId: Id, operation: () => Promise<T>): Promise<T> {
+  return withKeyedLock(this.appointmentLocks, appointmentId, operation);
+}
+
+async withConversationLock<T>(conversationId: Id, operation: () => Promise<T>): Promise<T> {
+  return withKeyedLock(this.conversationLocks, conversationId, operation);
+}
+
+async withWebhookDeliveryLock<T>(idempotencyKey: string, operation: () => Promise<T>): Promise<T> {
+  return withKeyedLock(this.webhookDeliveryLocks, idempotencyKey, operation);
+}
+
 hasProcessedWebhookDelivery(idempotencyKey: string) {
   return this.processedWebhookDeliveries.has(idempotencyKey) || this.processedWebhookDeliveries.has(`kapso:${idempotencyKey}`);
 }
@@ -293,10 +344,14 @@ import type { Conversation, OperationalRepository, PendingBooking } from "../../
 
 Change constructor dependency from `InMemoryRepositories` to `OperationalRepository`.
 
-Make repository helpers async and await their calls:
+Wrap inbound handling in the repository conversation lock, then make repository helpers async and await their calls:
 
 ```ts
 async handleInboundMessage(input: InboundMessage): Promise<WorkflowResult> {
+  return this.repos.withConversationLock(input.conversationId, () => this.handleInboundMessageLocked(input));
+}
+
+private async handleInboundMessageLocked(input: InboundMessage): Promise<WorkflowResult> {
   await this.upsertPatient(input);
   const conversation = await this.upsertConversation(input);
   if (conversation.botPaused) {
@@ -328,7 +383,9 @@ await this.repos.saveAppointment(appointment);
 const appointment = await this.repos.getAppointment(input.appointmentId);
 ```
 
-Modify `src/application/messaging/whatsapp-inbound-service.ts` and `src/application/messaging/outbound-template-service.ts` so constructor `repos` uses `OperationalRepository` and all repository calls are awaited.
+Modify `src/application/messaging/whatsapp-inbound-service.ts` so constructor `repos` uses `OperationalRepository`, inbound handling is wrapped in `repos.withWebhookDeliveryLock(message.idempotencyKey, ...)`, processed deliveries are marked with structured metadata, and all repository calls are awaited.
+
+Modify `src/application/messaging/outbound-template-service.ts` so constructor `repos` uses `OperationalRepository` and all repository calls are awaited.
 
 - [ ] **Step 5: Verify and commit**
 
@@ -1210,11 +1267,74 @@ npm test -- tests/prisma-runtime-persistence.test.ts
 
 Expected: FAIL until Prisma repo behavior from previous tasks is fully compatible with workflow and inbound service.
 
-- [ ] **Step 2: Apply the exact integration fixes**
+- [ ] **Step 2: Add failing calendar compensation test**
+
+Add this test to `tests/scheduling-service.test.ts`:
+
+```ts
+class FailingSaveRepository extends InMemoryRepositories {
+  override saveAppointment() {
+    throw new Error("database unavailable");
+  }
+}
+
+it("cancels a newly-created calendar event when appointment persistence fails", async () => {
+  const calendar = new CapturingCalendar();
+  const audit = new InMemoryAuditLog();
+  const repos = new FailingSaveRepository();
+  repos.upsertClinicProfile(parseClinicProfile({
+    clinicId: "clinic_1",
+    name: "Clinica Demo",
+    timezone: "America/Argentina/Buenos_Aires",
+    services: [
+      {
+        id: "svc_botox",
+        name: "Botox",
+        durationMinutes: 30,
+        priceText: "Desde $120.000",
+        preparation: "Evitar alcohol 24 horas antes.",
+        restrictions: [],
+        professionalIds: ["pro_perez"]
+      }
+    ],
+    professionals: [{ id: "pro_perez", name: "Dra. Perez", calendarId: "cal_perez" }],
+    appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 0, bufferMinutes: 0 },
+    requiredPatientFields: ["fullName"]
+  }));
+  repos.upsertPatient({ id: "pat_1", whatsappNumber: "+5491111111111", fullName: "Ana Gomez" });
+  calendar.seedAvailability("cal_perez", [
+    { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
+  ]);
+  const service = new SchedulingService(repos, calendar, audit, () => new Date("2026-05-29T12:00:00.000Z"));
+
+  await expect(
+    service.bookAppointment({
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      serviceId: "svc_botox",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      professionalId: "pro_perez",
+      conversationId: "conv_1"
+    })
+  ).rejects.toThrow("database unavailable");
+
+  expect(calendar.cancelEventInputs).toEqual([{ eventId: "evt_1", calendarId: "cal_perez" }]);
+});
+```
+
+Run:
+
+```bash
+npm test -- tests/scheduling-service.test.ts
+```
+
+Expected: FAIL because `SchedulingService.bookAppointment()` does not yet compensate the calendar event when appointment persistence fails.
+
+- [ ] **Step 3: Apply the exact integration fixes**
 
 Make these changes in already-created files so the restart and duplicate tests pass.
 
-Modify `src/application/messaging/whatsapp-inbound-service.ts` so successful sends mark processed deliveries with structured metadata:
+Modify `src/application/messaging/whatsapp-inbound-service.ts` so successful sends and bot-paused skips mark processed deliveries with structured metadata:
 
 ```ts
 await this.options.repos.markProcessedWebhookDelivery({
@@ -1240,12 +1360,24 @@ In `src/adapters/prisma/operational-repository.ts`, `upsertClinicProfile()` must
 - `Professional`
 - `ServiceProfessional`
 
-- [ ] **Step 3: Verify and commit**
+Modify `src/application/scheduling/scheduling-service.ts` so `bookAppointment()` compensates only newly created calendar events when `repos.saveAppointment()` fails:
+
+```ts
+try {
+  await this.repos.saveAppointment(appointment);
+} catch (error) {
+  await this.calendar.cancelEvent(event.id, professional.calendarId).catch(() => undefined);
+  throw error;
+}
+```
+
+- [ ] **Step 4: Verify and commit**
 
 Run:
 
 ```bash
 npm test -- tests/prisma-runtime-persistence.test.ts tests/kapso-webhook.test.ts tests/conversation-workflow.test.ts
+npm test -- tests/scheduling-service.test.ts
 npm run typecheck
 ```
 
@@ -1254,7 +1386,7 @@ Expected: restart persistence tests, webhook tests, conversation tests, and type
 Commit:
 
 ```bash
-git add tests/prisma-runtime-persistence.test.ts src/application/messaging/whatsapp-inbound-service.ts src/application/conversations/conversation-workflow.ts src/application/scheduling/scheduling-service.ts src/adapters/prisma/operational-repository.ts
+git add tests/prisma-runtime-persistence.test.ts tests/scheduling-service.test.ts src/application/messaging/whatsapp-inbound-service.ts src/application/conversations/conversation-workflow.ts src/application/scheduling/scheduling-service.ts src/adapters/prisma/operational-repository.ts
 git commit -m "test: prove prisma runtime persistence"
 ```
 
@@ -1424,7 +1556,7 @@ git commit -m "docs: document prisma operational persistence"
 
 ## Plan Self-Review
 
-- Spec coverage: repository persistence is covered by Tasks 1, 4, and 5; audit by Task 3; webhook idempotency by Tasks 2, 4, and 6; runtime wiring by Task 7; docs and final verification by Task 8.
+- Spec coverage: repository persistence is covered by Tasks 1, 4, and 5; audit by Task 3; webhook idempotency by Tasks 1, 2, 4, and 6; runtime wiring by Task 7; docs and final verification by Task 8.
 - Plan scan: no red-flag filler text or unspecified future behavior remains in task steps.
 - Type consistency: `OperationalRepository`, `ProcessedWebhookDeliveryInput`, `PrismaOperationalRepository`, and `PrismaAuditLog` names are introduced before later tasks use them.
 - Scope check: dashboard, onboarding UI, analytics, schedulers, OpenAI intent interpretation, Outlook, and editable clinic configuration are not included.

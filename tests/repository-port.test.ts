@@ -5,12 +5,12 @@ import { InMemoryRepositories } from "../src/adapters/memory/repositories.js";
 import { ConversationWorkflow } from "../src/application/conversations/conversation-workflow.js";
 import { SchedulingService } from "../src/application/scheduling/scheduling-service.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
-import type { OperationalRepository } from "../src/ports/repositories.js";
+import type { OperationalRepository, ProcessedWebhookDeliveryInput } from "../src/ports/repositories.js";
 
 describe("OperationalRepository port", () => {
   it("allows workflow services to use an async repository implementation", async () => {
     const base = new InMemoryRepositories();
-    const repos: OperationalRepository = new AsyncRepositoryAdapter(base);
+    const repos = new AsyncRepositoryAdapter(base);
     const audit = new InMemoryAuditLog();
     const calendar = new FakeCalendar();
 
@@ -54,10 +54,13 @@ describe("OperationalRepository port", () => {
     expect((await repos.getConversation("conv_async"))?.pendingBooking).toEqual(
       expect.objectContaining({ serviceId: "svc_botox" })
     );
+    expect(repos.conversationLockCalls).toEqual(["conv_async"]);
   });
 });
 
 class AsyncRepositoryAdapter implements OperationalRepository {
+  readonly conversationLockCalls: string[] = [];
+
   constructor(private readonly inner: InMemoryRepositories) {}
 
   async upsertClinicProfile(input: Parameters<InMemoryRepositories["upsertClinicProfile"]>[0]) {
@@ -96,6 +99,15 @@ class AsyncRepositoryAdapter implements OperationalRepository {
     return this.inner.withAppointmentLock(appointmentId, operation);
   }
 
+  async withConversationLock<T>(conversationId: string, operation: () => Promise<T>) {
+    this.conversationLockCalls.push(conversationId);
+    return this.inner.withConversationLock(conversationId, operation);
+  }
+
+  async withWebhookDeliveryLock<T>(idempotencyKey: string, operation: () => Promise<T>) {
+    return this.inner.withWebhookDeliveryLock(idempotencyKey, operation);
+  }
+
   async getAppointment(input: string) {
     return this.inner.getAppointment(input);
   }
@@ -124,7 +136,7 @@ class AsyncRepositoryAdapter implements OperationalRepository {
     return this.inner.hasProcessedWebhookDelivery(input);
   }
 
-  async markProcessedWebhookDelivery(input: string) {
+  async markProcessedWebhookDelivery(input: string | ProcessedWebhookDeliveryInput) {
     return this.inner.markProcessedWebhookDelivery(input);
   }
 }

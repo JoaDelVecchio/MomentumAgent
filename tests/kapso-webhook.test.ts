@@ -201,6 +201,30 @@ describe("WhatsAppInboundService", () => {
     expect(context.provider.sentTextMessages).toEqual([]);
   });
 
+  it("serializes concurrent duplicate deliveries before sending replies", async () => {
+    const context = buildInboundServiceContext({
+      kind: "reply",
+      text: "Tengo un turno disponible.",
+      delayMs: 20
+    });
+
+    const results = await Promise.all([
+      context.service.handleInboundMessage(normalizedInboundMessage()),
+      context.service.handleInboundMessage(normalizedInboundMessage())
+    ]);
+
+    expect(results).toEqual([
+      {
+        status: "sent",
+        workflowResult: "reply",
+        providerMessageId: "msg_1"
+      },
+      { status: "ignored_duplicate" }
+    ]);
+    expect(context.workflow.calls).toHaveLength(1);
+    expect(context.provider.sentTextMessages).toHaveLength(1);
+  });
+
   it("audits send failures and leaves the delivery retryable", async () => {
     const context = buildInboundServiceContext({ kind: "reply", text: "Tengo un turno disponible." });
     context.provider.failNextSend("kapso unavailable");
@@ -374,7 +398,7 @@ function normalizedInboundMessage() {
   };
 }
 
-function buildInboundServiceContext(result: WorkflowResult) {
+function buildInboundServiceContext(result: WorkflowResult & { delayMs?: number }) {
   const repos = new InMemoryRepositories();
   const provider = new FakeWhatsAppProvider();
   const audit = new InMemoryAuditLog();
@@ -416,7 +440,7 @@ class FakeConversationWorkflow {
     text: string;
   }> = [];
 
-  constructor(private readonly result: WorkflowResult) {}
+  constructor(private readonly result: WorkflowResult & { delayMs?: number }) {}
 
   async handleInboundMessage(input: {
     clinicId: string;
@@ -425,7 +449,11 @@ class FakeConversationWorkflow {
     whatsappNumber: string;
     text: string;
   }) {
+    if (this.result.delayMs) {
+      await new Promise((resolve) => setTimeout(resolve, this.result.delayMs));
+    }
     this.calls.push(input);
-    return this.result;
+    const { delayMs: _delayMs, ...result } = this.result;
+    return result;
   }
 }

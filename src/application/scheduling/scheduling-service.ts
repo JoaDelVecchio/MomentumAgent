@@ -105,7 +105,12 @@ export class SchedulingService {
       status: "scheduled"
     };
 
-    await this.repos.saveAppointment(appointment);
+    try {
+      await this.repos.saveAppointment(appointment);
+    } catch (error) {
+      await this.calendar.cancelEvent(event.id, professional.calendarId).catch(() => undefined);
+      throw error;
+    }
     await this.audit.record({
       clinicId: input.clinicId,
       conversationId: input.conversationId,

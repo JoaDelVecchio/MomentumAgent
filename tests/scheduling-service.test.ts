@@ -64,6 +64,12 @@ class CapturingCalendar extends FakeCalendar {
   }
 }
 
+class FailingSaveRepository extends InMemoryRepositories {
+  override saveAppointment() {
+    throw new Error("database unavailable");
+  }
+}
+
 function buildContext(calendar = new FakeCalendar(), now = () => new Date("2026-05-29T12:00:00.000Z")) {
   const repos = new InMemoryRepositories();
   const audit = new InMemoryAuditLog();
@@ -217,6 +223,51 @@ describe("SchedulingService", () => {
     expect(appointment.status).toBe("scheduled");
     expect(repos.getAppointment(appointment.id)).toEqual(appointment);
     expect((await audit.list()).map((event) => event.type)).toContain("appointment.created");
+  });
+
+  it("cancels a newly-created calendar event when appointment persistence fails", async () => {
+    const calendar = new CapturingCalendar();
+    const audit = new InMemoryAuditLog();
+    const repos = new FailingSaveRepository();
+    repos.upsertClinicProfile(
+      parseClinicProfile({
+        clinicId: "clinic_1",
+        name: "Clinica Demo",
+        timezone: "America/Argentina/Buenos_Aires",
+        services: [
+          {
+            id: "svc_botox",
+            name: "Botox",
+            durationMinutes: 30,
+            priceText: "Desde $120.000",
+            preparation: "Evitar alcohol 24 horas antes.",
+            restrictions: [],
+            professionalIds: ["pro_perez"]
+          }
+        ],
+        professionals: [{ id: "pro_perez", name: "Dra. Perez", calendarId: "cal_perez" }],
+        appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 0, bufferMinutes: 0 },
+        requiredPatientFields: ["fullName"]
+      })
+    );
+    repos.upsertPatient({ id: "pat_1", whatsappNumber: "+5491111111111", fullName: "Ana Gomez" });
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
+    ]);
+    const service = new SchedulingService(repos, calendar, audit, () => new Date("2026-05-29T12:00:00.000Z"));
+
+    await expect(
+      service.bookAppointment({
+        clinicId: "clinic_1",
+        patientId: "pat_1",
+        serviceId: "svc_botox",
+        startsAt: new Date("2026-06-01T13:00:00.000Z"),
+        professionalId: "pro_perez",
+        conversationId: "conv_1"
+      })
+    ).rejects.toThrow("database unavailable");
+
+    expect(calendar.cancelEventInputs).toEqual([{ eventId: "evt_1", calendarId: "cal_perez" }]);
   });
 
   it("reschedules an appointment into a newly available slot", async () => {

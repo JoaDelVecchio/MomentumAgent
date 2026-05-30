@@ -29,6 +29,14 @@ export class WhatsAppInboundService {
   constructor(private readonly options: WhatsAppInboundServiceOptions) {}
 
   async handleInboundMessage(message: NormalizedWhatsAppInboundMessage): Promise<WhatsAppInboundResult> {
+    return this.options.repos.withWebhookDeliveryLock(message.idempotencyKey, () =>
+      this.handleInboundMessageLocked(message)
+    );
+  }
+
+  private async handleInboundMessageLocked(
+    message: NormalizedWhatsAppInboundMessage
+  ): Promise<WhatsAppInboundResult> {
     if (await this.options.repos.hasProcessedWebhookDelivery(message.idempotencyKey)) {
       await this.auditDuplicate(message);
       return { status: "ignored_duplicate" };
@@ -38,7 +46,7 @@ export class WhatsAppInboundService {
 
     const existingConversation = await this.options.repos.getConversation(message.conversationId);
     if (existingConversation?.botPaused) {
-      await this.options.repos.markProcessedWebhookDelivery(message.idempotencyKey);
+      await this.markProcessedWebhookDelivery(message);
       await this.auditBotPaused(message);
       return { status: "bot_paused" };
     }
@@ -58,7 +66,7 @@ export class WhatsAppInboundService {
         text: workflowResult.text
       });
 
-      await this.options.repos.markProcessedWebhookDelivery(message.idempotencyKey);
+      await this.markProcessedWebhookDelivery(message);
       await this.auditOutboundSent(message, workflowResult, sendResult.providerMessageId);
 
       return {
@@ -70,6 +78,16 @@ export class WhatsAppInboundService {
       await this.auditOutboundFailed(message);
       throw error;
     }
+  }
+
+  private async markProcessedWebhookDelivery(message: NormalizedWhatsAppInboundMessage) {
+    await this.options.repos.markProcessedWebhookDelivery({
+      provider: "kapso",
+      idempotencyKey: message.idempotencyKey,
+      clinicId: message.clinicId,
+      conversationId: message.conversationId,
+      providerMessageId: message.providerMessageId
+    });
   }
 
   private async auditInboundAccepted(message: NormalizedWhatsAppInboundMessage) {

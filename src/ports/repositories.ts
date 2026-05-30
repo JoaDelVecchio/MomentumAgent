@@ -49,6 +49,8 @@ export interface OperationalRepository {
   saveAppointment(appointment: Appointment): MaybePromise<void>;
   nextAppointmentId(): MaybePromise<Id>;
   withAppointmentLock<T>(appointmentId: Id, operation: () => Promise<T>): Promise<T>;
+  withConversationLock<T>(conversationId: Id, operation: () => Promise<T>): Promise<T>;
+  withWebhookDeliveryLock<T>(idempotencyKey: string, operation: () => Promise<T>): Promise<T>;
   getAppointment(appointmentId: Id): MaybePromise<Appointment | undefined>;
   listAppointmentsByPatient(patientId: Id): MaybePromise<Appointment[]>;
   saveInterest(interest: PatientInterest): MaybePromise<void>;
