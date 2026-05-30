@@ -97,12 +97,20 @@ describe("OnboardingTestModeService", () => {
     };
 
     await context.testModeService.runMessage({ ...input, text: "Quiero reservar botox" });
+    await context.onboarding.updateReadinessFlags({
+      clinicId: "clinic_setup",
+      testConversationPassed: false,
+      updatedAt: new Date("2026-06-01T12:01:00.000Z")
+    });
     const result = await context.testModeService.runMessage({ ...input, text: "Ana Gomez" });
 
     expect(result).toEqual({
       kind: "reply",
       text: "Ese horario ya no esta disponible. Te busco otro horario si queres."
     });
+    await expect(context.onboarding.getClinicSetup("clinic_setup")).resolves.toEqual(
+      expect.objectContaining({ testConversationPassed: false })
+    );
     expect(context.operational.listAppointmentsByPatient("test_patient:clinic_setup")).toEqual([]);
     await expect(context.calendar.getEvent("evt_1", "cal_perez")).resolves.toBeUndefined();
     expect(context.operational.getPatient("prod_patient")).toBeUndefined();

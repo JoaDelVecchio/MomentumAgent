@@ -70,7 +70,7 @@ export class OnboardingTestModeService {
     await this.requireConfiguredClinic(input.clinicId);
 
     const result = await this.workflow.handleInboundMessage(input);
-    if (result.kind === "reply") {
+    if (isPositiveBookingTestReply(result)) {
       await this.options.onboarding.updateReadinessFlags({
         clinicId: input.clinicId,
         testConversationPassed: true,
@@ -104,6 +104,10 @@ export class OnboardingTestModeService {
       throw new OnboardingTestModeError("clinic_profile_missing", `Clinic profile ${clinicId} not found`);
     }
   }
+}
+
+function isPositiveBookingTestReply(result: WorkflowResult): boolean {
+  return result.kind === "reply" && result.text.includes("Tengo este horario");
 }
 
 class DryRunCalendar implements CalendarPort {
