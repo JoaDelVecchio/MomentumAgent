@@ -35,32 +35,54 @@ export class PrismaCalendarCredentialRepository implements CalendarCredentialRep
   ) {}
 
   async save(input: CalendarCredentialInput): Promise<CalendarCredentials> {
-    const connection = await this.prisma.calendarConnection.upsert({
+    const existing = await this.prisma.calendarConnection.findUnique({
       where: {
         clinicId_provider: {
           clinicId: input.clinicId,
           provider: input.provider
         }
-      },
-      create: {
-        clinicId: input.clinicId,
-        provider: input.provider,
-        providerAccountEmail: input.providerAccountEmail,
-        scopesJson: JSON.stringify(input.scopes),
-        encryptedAccessToken:
-          input.accessToken === undefined ? null : this.cipher.encrypt(input.accessToken),
-        encryptedRefreshToken: this.cipher.encrypt(input.refreshToken),
-        expiryDate: input.expiryDate ?? null
-      },
-      update: {
-        providerAccountEmail: input.providerAccountEmail,
-        scopesJson: JSON.stringify(input.scopes),
-        encryptedAccessToken:
-          input.accessToken === undefined ? null : this.cipher.encrypt(input.accessToken),
-        encryptedRefreshToken: this.cipher.encrypt(input.refreshToken),
-        expiryDate: input.expiryDate ?? null
       }
     });
+    if (!input.refreshToken && !existing) {
+      throw new Error("refreshToken is required for new calendar credentials");
+    }
+
+    const encryptedAccessToken =
+      input.accessToken === undefined
+        ? existing?.encryptedAccessToken ?? null
+        : this.cipher.encrypt(input.accessToken);
+    const encryptedRefreshToken = input.refreshToken
+      ? this.cipher.encrypt(input.refreshToken)
+      : existing?.encryptedRefreshToken ?? "";
+    const expiryDate = input.expiryDate ?? existing?.expiryDate ?? null;
+
+    const connection = existing
+      ? await this.prisma.calendarConnection.update({
+          where: {
+            clinicId_provider: {
+              clinicId: input.clinicId,
+              provider: input.provider
+            }
+          },
+          data: {
+            providerAccountEmail: input.providerAccountEmail,
+            scopesJson: JSON.stringify(input.scopes),
+            encryptedAccessToken,
+            encryptedRefreshToken,
+            expiryDate
+          }
+        })
+      : await this.prisma.calendarConnection.create({
+          data: {
+            clinicId: input.clinicId,
+            provider: input.provider,
+            providerAccountEmail: input.providerAccountEmail,
+            scopesJson: JSON.stringify(input.scopes),
+            encryptedAccessToken,
+            encryptedRefreshToken,
+            expiryDate
+          }
+        });
 
     return this.toCredentials(connection);
   }
@@ -116,7 +138,11 @@ export class Aes256GcmTokenCipher implements TokenCipher {
 
   encrypt(plainText: string): string {
     const iv = this.randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", this.key, iv);
+    if (iv.length !== 12) {
+      throw new Error("Token encryption IV must be exactly 12 bytes");
+    }
+
+    const cipher = createCipheriv("aes-256-gcm", this.key, iv, { authTagLength: 16 });
     const encrypted = Buffer.concat([cipher.update(plainText, "utf8"), cipher.final()]);
     const authTag = cipher.getAuthTag();
 
@@ -129,15 +155,26 @@ export class Aes256GcmTokenCipher implements TokenCipher {
   }
 
   decrypt(cipherText: string): string {
-    const [version, ivBase64, authTagBase64, encryptedBase64] = cipherText.split(":");
+    const parts = cipherText.split(":");
+    if (parts.length !== 4) {
+      throw new Error("Invalid encrypted token payload");
+    }
+    const [version, ivBase64, authTagBase64, encryptedBase64] = parts;
     if (version !== "v1" || !ivBase64 || !authTagBase64 || !encryptedBase64) {
       throw new Error("Invalid encrypted token payload");
     }
 
-    const decipher = createDecipheriv("aes-256-gcm", this.key, Buffer.from(ivBase64, "base64"));
-    decipher.setAuthTag(Buffer.from(authTagBase64, "base64"));
+    const iv = Buffer.from(ivBase64, "base64");
+    const authTag = Buffer.from(authTagBase64, "base64");
+    const encrypted = Buffer.from(encryptedBase64, "base64");
+    if (iv.length !== 12 || authTag.length !== 16) {
+      throw new Error("Invalid encrypted token payload");
+    }
+
+    const decipher = createDecipheriv("aes-256-gcm", this.key, iv, { authTagLength: 16 });
+    decipher.setAuthTag(authTag);
     const decrypted = Buffer.concat([
-      decipher.update(Buffer.from(encryptedBase64, "base64")),
+      decipher.update(encrypted),
       decipher.final()
     ]);
 

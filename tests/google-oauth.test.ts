@@ -1,4 +1,8 @@
 import { PrismaClient } from "@prisma/client";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { InMemoryCalendarCredentialRepository } from "../src/adapters/memory/calendar-auth-repository.js";
 import {
@@ -53,12 +57,18 @@ describe("InMemoryCalendarCredentialRepository", () => {
 
 describe("PrismaCalendarCredentialRepository", () => {
   const clinicId = "clinic_google_oauth_prisma";
-  const prisma = new PrismaClient();
   const cipher = new Aes256GcmTokenCipher("01".repeat(32), () => Buffer.alloc(12, 4));
-  const repository = new PrismaCalendarCredentialRepository(prisma, cipher);
+  let prisma: PrismaClient;
+  let repository: PrismaCalendarCredentialRepository;
+  let tempDirectory: string;
 
   beforeAll(async () => {
-    await prisma.calendarConnection.deleteMany({ where: { clinicId } });
+    tempDirectory = mkdtempSync(join(tmpdir(), "momentum-google-oauth-test-"));
+    const databasePath = join(tempDirectory, "test.db");
+    applySqliteMigrations(databasePath);
+    prisma = new PrismaClient({ datasources: { db: { url: `file:${databasePath}` } } });
+    repository = new PrismaCalendarCredentialRepository(prisma, cipher);
+
     await prisma.clinic.upsert({
       where: { id: clinicId },
       update: {},
@@ -75,9 +85,8 @@ describe("PrismaCalendarCredentialRepository", () => {
   });
 
   afterAll(async () => {
-    await prisma.calendarConnection.deleteMany({ where: { clinicId } });
-    await prisma.clinic.deleteMany({ where: { id: clinicId } });
     await prisma.$disconnect();
+    rmSync(tempDirectory, { recursive: true, force: true });
   });
 
   it("stores encrypted tokens without exposing the raw refresh token string", async () => {
@@ -103,4 +112,64 @@ describe("PrismaCalendarCredentialRepository", () => {
     expect(stored?.encryptedRefreshToken).not.toContain(refreshToken);
     expect(credentials?.refreshToken).toBe(refreshToken);
   });
+
+  it("preserves the existing refresh token when only access token details change", async () => {
+    await repository.save({
+      clinicId,
+      provider: "google",
+      providerAccountEmail: "calendar@example.com",
+      scopes: [googleCalendarScope],
+      accessToken: "old_access_token",
+      refreshToken: "stable_refresh_token",
+      expiryDate: new Date("2026-06-01T12:00:00.000Z")
+    });
+
+    await repository.save({
+      clinicId,
+      provider: "google",
+      providerAccountEmail: "calendar@example.com",
+      scopes: [googleCalendarScope],
+      accessToken: "new_access_token",
+      expiryDate: new Date("2026-06-01T13:00:00.000Z")
+    });
+
+    const credentials = await repository.get({ clinicId, provider: "google" });
+
+    expect(credentials?.accessToken).toBe("new_access_token");
+    expect(credentials?.refreshToken).toBe("stable_refresh_token");
+    expect(credentials?.expiryDate).toEqual(new Date("2026-06-01T13:00:00.000Z"));
+  });
+
+  it("returns undefined from Prisma storage when credentials are missing", async () => {
+    await expect(
+      repository.get({
+        clinicId: "clinic_without_prisma_credentials",
+        provider: "google"
+      })
+    ).resolves.toBeUndefined();
+  });
 });
+
+describe("Aes256GcmTokenCipher", () => {
+  it("rejects encrypted token payloads with non-canonical tag length", () => {
+    const cipher = new Aes256GcmTokenCipher("01".repeat(32), () => Buffer.alloc(12, 4));
+    const encrypted = cipher.encrypt("sensitive_refresh_token");
+    const [version, iv, authTag, payload] = encrypted.split(":");
+    const truncatedTag = Buffer.from(authTag ?? "", "base64").subarray(0, 4).toString("base64");
+
+    expect(() => cipher.decrypt([version, iv, truncatedTag, payload].join(":"))).toThrow(
+      "Invalid encrypted token payload"
+    );
+  });
+});
+
+function applySqliteMigrations(databasePath: string) {
+  const migrationsPath = join(process.cwd(), "prisma", "migrations");
+  const migrationSql = readdirSync(migrationsPath)
+    .filter((entry) => entry !== "migration_lock.toml")
+    .sort()
+    .map((entry) => readFileSync(join(migrationsPath, entry, "migration.sql"), "utf8"))
+    .join("\n");
+
+  execFileSync("sqlite3", [databasePath], { input: migrationSql });
+}

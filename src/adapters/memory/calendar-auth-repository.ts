@@ -13,8 +13,18 @@ export class InMemoryCalendarCredentialRepository implements CalendarCredentialR
     const key = credentialKey(input);
     const existing = this.credentials.get(key);
     const now = new Date();
+    if (!input.refreshToken && !existing) {
+      throw new Error("refreshToken is required for new calendar credentials");
+    }
+
     const credentials: CalendarCredentials = {
-      ...cloneInput(input),
+      clinicId: input.clinicId,
+      provider: input.provider,
+      providerAccountEmail: input.providerAccountEmail,
+      scopes: [...input.scopes],
+      accessToken: input.accessToken ?? existing?.accessToken,
+      refreshToken: input.refreshToken ?? existing?.refreshToken ?? "",
+      expiryDate: input.expiryDate ? new Date(input.expiryDate) : existing?.expiryDate,
       id: existing?.id ?? `calendar_connection_${this.nextId++}`,
       createdAt: existing ? new Date(existing.createdAt) : now,
       updatedAt: now
@@ -32,14 +42,6 @@ export class InMemoryCalendarCredentialRepository implements CalendarCredentialR
 
 function credentialKey(lookup: CalendarCredentialLookup) {
   return `${lookup.provider}:${lookup.clinicId}`;
-}
-
-function cloneInput(input: CalendarCredentialInput): CalendarCredentialInput {
-  return {
-    ...input,
-    scopes: [...input.scopes],
-    expiryDate: input.expiryDate ? new Date(input.expiryDate) : undefined
-  };
 }
 
 function cloneCredentials(credentials: CalendarCredentials): CalendarCredentials {

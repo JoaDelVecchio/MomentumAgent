@@ -9,12 +9,17 @@ export type CalendarCredentialInput = CalendarCredentialLookup & {
   providerAccountEmail: string;
   scopes: string[];
   accessToken?: string;
-  refreshToken: string;
+  refreshToken?: string;
   expiryDate?: Date;
 };
 
-export type CalendarCredentials = CalendarCredentialInput & {
+export type CalendarCredentials = CalendarCredentialLookup & {
   id: string;
+  providerAccountEmail: string;
+  scopes: string[];
+  accessToken?: string;
+  refreshToken: string;
+  expiryDate?: Date;
   createdAt: Date;
   updatedAt: Date;
 };
