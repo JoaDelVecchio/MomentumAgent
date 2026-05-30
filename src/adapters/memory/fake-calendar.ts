@@ -81,7 +81,7 @@ export class FakeCalendar implements CalendarPort {
     return cloneEvent(updated);
   }
 
-  async cancelEvent(eventId: string): Promise<CalendarEvent> {
+  async cancelEvent(eventId: string, _calendarId?: string): Promise<CalendarEvent> {
     const existing = this.events.get(eventId);
     if (!existing) {
       throw new Error(`Calendar event ${eventId} not found`);
@@ -92,7 +92,7 @@ export class FakeCalendar implements CalendarPort {
     return cloneEvent(cancelled);
   }
 
-  async getEvent(eventId: string): Promise<CalendarEvent | undefined> {
+  async getEvent(eventId: string, _calendarId?: string): Promise<CalendarEvent | undefined> {
     const event = this.events.get(eventId);
     return event ? cloneEvent(event) : undefined;
   }

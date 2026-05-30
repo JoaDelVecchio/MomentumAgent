@@ -83,6 +83,7 @@ describe("InMemoryRepositories", () => {
       serviceId: "svc_botox",
       professionalId: "pro_perez",
       calendarEventId: "evt_1",
+      calendarId: "cal_perez",
       startsAt,
       endsAt,
       status: "scheduled" as const

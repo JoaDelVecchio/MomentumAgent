@@ -52,6 +52,6 @@ export interface CalendarPort {
   findFreeSlots(input: FindFreeSlotsInput): Promise<CalendarSlot[]>;
   createEvent(input: CalendarEventInput): Promise<CalendarEvent>;
   updateEvent(eventId: string, input: CalendarEventInput): Promise<CalendarEvent>;
-  cancelEvent(eventId: string): Promise<CalendarEvent>;
-  getEvent(eventId: string): Promise<CalendarEvent | undefined>;
+  cancelEvent(eventId: string, calendarId?: string): Promise<CalendarEvent>;
+  getEvent(eventId: string, calendarId?: string): Promise<CalendarEvent | undefined>;
 }

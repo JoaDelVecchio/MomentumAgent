@@ -96,6 +96,7 @@ export class SchedulingService {
       serviceId: input.serviceId,
       professionalId: professional.id,
       calendarEventId: event.id,
+      calendarId: professional.calendarId,
       startsAt,
       endsAt,
       status: "scheduled"
@@ -125,8 +126,7 @@ export class SchedulingService {
       if (appointment.startsAt.getTime() - this.now().getTime() < cancellationNoticeMs) {
         throw new DomainError(`Appointment ${appointment.id} cannot be cancelled inside the notice window`);
       }
-
-      await this.calendar.cancelEvent(appointment.calendarEventId);
+      await this.calendar.cancelEvent(appointment.calendarEventId, appointment.calendarId);
       const cancelled: Appointment = { ...appointment, status: "cancelled" };
       this.repos.saveAppointment(cancelled);
       await this.audit.record({
@@ -170,15 +170,20 @@ export class SchedulingService {
       const startsAt = input.startsAt;
       const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60000);
       const calendarEndsAt = addMinutes(endsAt, profile.appointmentRules.bufferMinutes);
+      const eventCalendarId = appointment.calendarId;
       if (startsAt < this.minimumBookableStart(profile)) {
         throw new DomainError("Selected reschedule slot is no longer available");
       }
       const slots = await this.calendar.findFreeSlots({
-        calendarIds: [professional.calendarId],
+        calendarIds: [eventCalendarId],
         from: startsAt,
         to: calendarEndsAt,
         durationMinutes: service.durationMinutes + profile.appointmentRules.bufferMinutes,
-        availabilityContext: buildAvailabilityContext(profile, [professional], service.durationMinutes),
+        availabilityContext: buildAvailabilityContext(
+          profile,
+          [{ ...professional, calendarId: eventCalendarId }],
+          service.durationMinutes
+        ),
         ignoredEventId: appointment.calendarEventId
       });
       const exactSlot = findContainingSlot(slots, startsAt, calendarEndsAt);
@@ -187,7 +192,7 @@ export class SchedulingService {
       }
 
       await this.updateCalendarEvent(appointment.calendarEventId, {
-        calendarId: professional.calendarId,
+        calendarId: eventCalendarId,
         summary: `${service.name} - ${appointment.patientId}`,
         startsAt,
         endsAt: calendarEndsAt,

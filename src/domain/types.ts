@@ -60,6 +60,7 @@ export type Appointment = {
   serviceId: Id;
   professionalId: Id;
   calendarEventId: Id;
+  calendarId: Id;
   startsAt: Date;
   endsAt: Date;
   status: AppointmentStatus;

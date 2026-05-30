@@ -43,6 +43,27 @@ class CapturingFindSlotsCalendar extends FakeCalendar {
   }
 }
 
+class CapturingCalendar extends FakeCalendar {
+  readonly findFreeSlotsInputs: FindFreeSlotsInput[] = [];
+  readonly updateEventInputs: Array<{ eventId: string; input: CalendarEventInput }> = [];
+  readonly cancelEventInputs: Array<{ eventId: string; calendarId?: string }> = [];
+
+  override async findFreeSlots(input: FindFreeSlotsInput) {
+    this.findFreeSlotsInputs.push(input);
+    return super.findFreeSlots(input);
+  }
+
+  override async updateEvent(eventId: string, input: CalendarEventInput): Promise<CalendarEvent> {
+    this.updateEventInputs.push({ eventId, input });
+    return super.updateEvent(eventId, input);
+  }
+
+  override async cancelEvent(eventId: string, calendarId?: string): Promise<CalendarEvent> {
+    this.cancelEventInputs.push({ eventId, calendarId });
+    return super.cancelEvent(eventId, calendarId);
+  }
+}
+
 function buildContext(calendar = new FakeCalendar(), now = () => new Date("2026-05-29T12:00:00.000Z")) {
   const repos = new InMemoryRepositories();
   const audit = new InMemoryAuditLog();
@@ -267,6 +288,49 @@ describe("SchedulingService", () => {
     expect(cancelled.status).toBe("cancelled");
     expect((await calendar.getEvent(appointment.calendarEventId))?.status).toBe("cancelled");
     expect((await audit.list()).map((event) => event.type)).toContain("appointment.cancelled");
+  });
+
+  it("uses the appointment calendar id when professional calendar mapping changes later", async () => {
+    const calendar = new CapturingCalendar();
+    const { repos, service } = buildContext(calendar);
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") },
+      { startsAt: new Date("2026-06-02T14:00:00.000Z"), endsAt: new Date("2026-06-02T14:30:00.000Z") }
+    ]);
+    const appointment = await service.bookAppointment({
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      serviceId: "svc_botox",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      professionalId: "pro_perez"
+    });
+    const profile = repos.getClinicProfile("clinic_1");
+    if (!profile) {
+      throw new Error("Missing test clinic");
+    }
+    repos.upsertClinicProfile({
+      ...profile,
+      professionals: profile.professionals.map((professional) =>
+        professional.id === "pro_perez"
+          ? { ...professional, calendarId: "cal_perez_new" }
+          : professional
+      )
+    });
+
+    await service.rescheduleAppointment({
+      clinicId: "clinic_1",
+      appointmentId: appointment.id,
+      startsAt: new Date("2026-06-02T14:00:00.000Z")
+    });
+    await service.cancelAppointment({ clinicId: "clinic_1", appointmentId: appointment.id });
+
+    expect(appointment.calendarId).toBe("cal_perez");
+    expect(calendar.findFreeSlotsInputs.at(-1)?.calendarIds).toEqual(["cal_perez"]);
+    expect(calendar.updateEventInputs.at(-1)?.input.calendarId).toBe("cal_perez");
+    expect(calendar.cancelEventInputs.at(-1)).toEqual({
+      eventId: appointment.calendarEventId,
+      calendarId: "cal_perez"
+    });
   });
 
   it("does not mutate appointments across clinics", async () => {
