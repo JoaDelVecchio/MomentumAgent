@@ -378,6 +378,28 @@ describe("Google Calendar OAuth routes", () => {
     }
   });
 
+  it("rejects OAuth return paths with encoded dot segments or malformed encoding", () => {
+    const repository = new InMemoryCalendarCredentialRepository();
+    const service = new GoogleOAuthService(
+      config,
+      repository,
+      () => new FakeGoogleOAuthClient(config)
+    );
+
+    for (const returnPath of [
+      "/internal/onboarding/clinics/clinic_1/%2e",
+      "/internal/onboarding/clinics/clinic_1/%2e%2e",
+      "/internal/onboarding/clinics/clinic_1/%2E%2E",
+      "/internal/onboarding/clinics/clinic_1/%zz"
+    ]) {
+      expect(() =>
+        service.createAuthorizationUrl("clinic_1", {
+          returnPath
+        })
+      ).toThrow("Invalid Google OAuth return path");
+    }
+  });
+
   it("rejects callback tokens that do not include all required calendar scopes", async () => {
     const oauthClient = new FakeGoogleOAuthClient(config, {
       access_token: "partial_scope_access_token",
@@ -479,7 +501,7 @@ describe("Google Calendar OAuth routes", () => {
       {
         clinicId: "clinic_1",
         nonce: "test_nonce",
-        returnPath: "/internal/onboarding/clinics/clinic_10?googleCalendar=connected"
+        returnPath: "/internal/onboarding/clinics/clinic_1/%2e%2e"
       },
       config.stateSecret
     );
