@@ -120,7 +120,6 @@ model Conversation {
   updatedAt          DateTime     @updatedAt
   clinic             Clinic       @relation(fields: [clinicId], references: [id])
   patient            Patient      @relation(fields: [patientId], references: [id])
-  auditEvents        AuditEvent[]
 
   @@unique([clinicId, id])
   @@index([clinicId, updatedAt])
@@ -158,7 +157,6 @@ model AuditEvent {
   metadataJson   String
   createdAt      DateTime      @default(now())
   clinic         Clinic        @relation(fields: [clinicId], references: [id])
-  conversation   Conversation? @relation(fields: [clinicId, conversationId], references: [clinicId, id])
 
   @@index([clinicId, createdAt])
   @@index([conversationId, createdAt])

@@ -96,4 +96,24 @@ describe("PrismaAuditLog", () => {
       })
     );
   });
+
+  it("records conversation-scoped events before the conversation exists", async () => {
+    const audit = new PrismaAuditLog(prisma);
+
+    const event = await audit.record({
+      clinicId: "clinic_audit",
+      conversationId: "conv_not_persisted_yet",
+      type: "whatsapp.inbound.accepted",
+      message: "Accepted WhatsApp inbound delivery",
+      metadata: { idempotencyKey: "delivery_early" }
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        clinicId: "clinic_audit",
+        conversationId: "conv_not_persisted_yet",
+        metadata: { idempotencyKey: "delivery_early" }
+      })
+    );
+  });
 });
