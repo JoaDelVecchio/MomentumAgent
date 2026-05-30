@@ -1,9 +1,9 @@
-import type { InMemoryRepositories } from "../../adapters/memory/repositories.js";
 import type { AuditLogPort } from "../../ports/audit-log.js";
 import type { SendTemplateMessageInput, WhatsAppProvider } from "../../ports/messaging.js";
+import type { OperationalRepository } from "../../ports/repositories.js";
 
 export type OutboundTemplateServiceOptions = {
-  repos: InMemoryRepositories;
+  repos: OperationalRepository;
   provider: WhatsAppProvider;
   audit: AuditLogPort;
 };
@@ -16,7 +16,7 @@ export class OutboundTemplateService {
   constructor(private readonly options: OutboundTemplateServiceOptions) {}
 
   async sendApprovedTemplate(input: SendTemplateMessageInput): Promise<OutboundTemplateResult> {
-    if (this.options.repos.isOptedOut(input.to)) {
+    if (await this.options.repos.isOptedOut(input.to)) {
       await this.options.audit.record({
         clinicId: input.clinicId,
         type: "whatsapp.template.blocked",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FakeCalendar } from "../src/adapters/memory/fake-calendar.js";
 import { buildApp } from "../src/api/app.js";
+import { buildDemoClinicProfile } from "../src/dev/demo-clinic-profile.js";
 import type {
   CalendarEvent,
   CalendarEventInput,
@@ -36,6 +37,18 @@ class FailingCreateCalendar extends FakeCalendar {
 
 describe("local simulation API", () => {
   const simulationNow = new Date("2026-05-29T12:00:00.000Z");
+
+  it("uses the shared demo clinic profile for simulation", () => {
+    const profile = buildDemoClinicProfile();
+
+    expect(profile.clinicId).toBe("clinic_1");
+    expect(profile.professionals[0]).toEqual(
+      expect.objectContaining({
+        id: "pro_perez",
+        calendarId: "cal_perez"
+      })
+    );
+  });
 
   it("handles a simulated inbound WhatsApp booking message", async () => {
     const app = buildApp({ enableSimulationRoutes: true, simulationNow });

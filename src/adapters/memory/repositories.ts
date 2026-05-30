@@ -1,44 +1,30 @@
 import type { Appointment, ClinicProfile, Id, Patient } from "../../domain/types.js";
+import type {
+  Conversation,
+  ConversationLookup,
+  OperationalRepository,
+  PatientInterest,
+  PendingBooking,
+  ProcessedWebhookDeliveryInput,
+  WebhookDeliveryClaim,
+  WebhookDeliveryOutcomeInput,
+  WebhookDeliveryRecord
+} from "../../ports/repositories.js";
 
-export type PendingBooking = {
-  appointmentId?: Id;
-  serviceId: Id;
-  professionalId: Id;
-  startsAt: Date;
-  endsAt: Date;
-};
+export type { Conversation, PatientInterest, PendingBooking };
 
-export type Conversation = {
-  id: Id;
-  clinicId: Id;
-  patientId: Id;
-  botPaused: boolean;
-  pendingBooking?: PendingBooking;
-  createdAt: Date;
-  updatedAt: Date;
-};
-
-export type PatientInterest = {
-  id: Id;
-  clinicId: Id;
-  patientId: Id;
-  serviceId: Id;
-  professionalId?: Id;
-  preferredFrom: Date;
-  preferredTo: Date;
-  status: "active" | "fulfilled" | "expired";
-};
-
-export class InMemoryRepositories {
+export class InMemoryRepositories implements OperationalRepository {
   private clinicProfiles = new Map<Id, ClinicProfile>();
   private patients = new Map<Id, Patient>();
   private conversations = new Map<Id, Conversation>();
   private appointments = new Map<Id, Appointment>();
   private interests = new Map<Id, PatientInterest>();
   private optOutWhatsappNumbers = new Set<string>();
-  private processedWebhookDeliveries = new Set<string>();
+  private webhookDeliveries = new Map<string, WebhookDeliveryRecord>();
   private appointmentCounter = 0;
   private appointmentLocks = new Map<Id, Promise<unknown>>();
+  private conversationLocks = new Map<Id, Promise<unknown>>();
+  private webhookDeliveryLocks = new Map<string, Promise<unknown>>();
 
   upsertClinicProfile(profile: ClinicProfile) {
     this.clinicProfiles.set(profile.clinicId, cloneClinicProfile(profile));
@@ -59,11 +45,11 @@ export class InMemoryRepositories {
   }
 
   saveConversation(conversation: Conversation) {
-    this.conversations.set(conversation.id, cloneConversation(conversation));
+    this.conversations.set(conversationKey(conversation), cloneConversation(conversation));
   }
 
-  getConversation(conversationId: Id) {
-    const conversation = this.conversations.get(conversationId);
+  getConversation(lookup: ConversationLookup) {
+    const conversation = this.conversations.get(conversationKey({ clinicId: lookup.clinicId, id: lookup.conversationId }));
     return conversation ? cloneConversation(conversation) : undefined;
   }
 
@@ -77,24 +63,15 @@ export class InMemoryRepositories {
   }
 
   async withAppointmentLock<T>(appointmentId: Id, operation: () => Promise<T>): Promise<T> {
-    const previous = this.appointmentLocks.get(appointmentId) ?? Promise.resolve();
-    let release: () => void = () => {};
-    const currentLock = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const queuedLock = previous.catch(() => undefined).then(() => currentLock);
+    return withKeyedLock(this.appointmentLocks, appointmentId, operation);
+  }
 
-    this.appointmentLocks.set(appointmentId, queuedLock);
-    await previous.catch(() => undefined);
+  async withConversationLock<T>(conversationId: Id, operation: () => Promise<T>): Promise<T> {
+    return withKeyedLock(this.conversationLocks, conversationId, operation);
+  }
 
-    try {
-      return await operation();
-    } finally {
-      release();
-      if (this.appointmentLocks.get(appointmentId) === queuedLock) {
-        this.appointmentLocks.delete(appointmentId);
-      }
-    }
+  async withWebhookDeliveryLock<T>(idempotencyKey: string, operation: () => Promise<T>): Promise<T> {
+    return withKeyedLock(this.webhookDeliveryLocks, idempotencyKey, operation);
   }
 
   getAppointment(appointmentId: Id) {
@@ -127,11 +104,107 @@ export class InMemoryRepositories {
   }
 
   hasProcessedWebhookDelivery(idempotencyKey: string) {
-    return this.processedWebhookDeliveries.has(idempotencyKey);
+    return this.getWebhookDelivery(idempotencyKey)?.status === "processed";
   }
 
-  markProcessedWebhookDelivery(idempotencyKey: string) {
-    this.processedWebhookDeliveries.add(idempotencyKey);
+  claimWebhookDelivery(input: ProcessedWebhookDeliveryInput): WebhookDeliveryClaim {
+    const existing = this.getWebhookDelivery(input.idempotencyKey);
+    if (existing) {
+      if (existing.status === "response_ready" && existing.responseText && existing.workflowResult) {
+        const delivery: WebhookDeliveryRecord = { ...existing, ...input, status: "processing" };
+        this.webhookDeliveries.set(deliveryKey(input), delivery);
+        return { kind: "retry", delivery: cloneWebhookDelivery(delivery) };
+      }
+      return { kind: "existing", delivery: existing };
+    }
+
+    const delivery: WebhookDeliveryRecord = { ...input, status: "processing" };
+    this.webhookDeliveries.set(deliveryKey(input), delivery);
+    return { kind: "new", delivery: cloneWebhookDelivery(delivery) };
+  }
+
+  releaseWebhookDeliveryClaim(input: ProcessedWebhookDeliveryInput) {
+    const existing = this.getWebhookDelivery(input.idempotencyKey);
+    if (existing?.status === "processing" && !existing.responseText && !existing.workflowResult) {
+      this.webhookDeliveries.delete(deliveryKey(input));
+    }
+  }
+
+  getWebhookDelivery(idempotencyKey: string) {
+    const delivery =
+      this.webhookDeliveries.get(idempotencyKey) ?? this.webhookDeliveries.get(`kapso:${idempotencyKey}`);
+    return delivery ? cloneWebhookDelivery(delivery) : undefined;
+  }
+
+  saveWebhookDeliveryOutcome(input: WebhookDeliveryOutcomeInput) {
+    const existing = this.getWebhookDelivery(input.idempotencyKey);
+    this.webhookDeliveries.set(deliveryKey(input), {
+      ...existing,
+      ...input,
+      status: "processing"
+    });
+  }
+
+  markWebhookDeliveryReadyForRetry(input: ProcessedWebhookDeliveryInput) {
+    const existing = this.getWebhookDelivery(input.idempotencyKey);
+    if (!existing) {
+      return;
+    }
+
+    this.webhookDeliveries.set(deliveryKey(input), {
+      ...existing,
+      ...input,
+      status: "response_ready"
+    });
+  }
+
+  markProcessedWebhookDelivery(input: string | ProcessedWebhookDeliveryInput) {
+    const delivery = normalizeProcessedWebhookDelivery(input);
+    const existing = this.getWebhookDelivery(delivery.idempotencyKey);
+    this.webhookDeliveries.set(deliveryKey(delivery), {
+      ...existing,
+      ...delivery,
+      status: "processed"
+    });
+  }
+}
+
+function conversationKey(input: { clinicId: Id; id: Id }) {
+  return `${input.clinicId}:${input.id}`;
+}
+
+function deliveryKey(input: string | ProcessedWebhookDeliveryInput) {
+  return typeof input === "string" ? input : `${input.provider}:${input.idempotencyKey}`;
+}
+
+function normalizeProcessedWebhookDelivery(input: string | ProcessedWebhookDeliveryInput): ProcessedWebhookDeliveryInput {
+  return typeof input === "string"
+    ? { provider: "kapso", idempotencyKey: input, clinicId: "clinic_1" }
+    : input;
+}
+
+async function withKeyedLock<T>(
+  locks: Map<string, Promise<unknown>>,
+  key: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const previous = locks.get(key) ?? Promise.resolve();
+  let release: () => void = () => {};
+  const currentLock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queuedLock = previous.catch(() => undefined).then(() => currentLock);
+
+  locks.set(key, queuedLock);
+  await previous.catch(() => undefined);
+
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (locks.get(key) === queuedLock) {
+      locks.delete(key);
+    }
   }
 }
 
@@ -185,4 +258,8 @@ function clonePatientInterest(interest: PatientInterest): PatientInterest {
     preferredFrom: new Date(interest.preferredFrom),
     preferredTo: new Date(interest.preferredTo)
   };
+}
+
+function cloneWebhookDelivery(delivery: WebhookDeliveryRecord): WebhookDeliveryRecord {
+  return { ...delivery };
 }

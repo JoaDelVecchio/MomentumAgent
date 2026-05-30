@@ -74,7 +74,7 @@ describe("ConversationWorkflow", () => {
       text: "Quiero reservar botox"
     });
 
-    expect(repos.getConversation("conv_1")?.pendingBooking).toEqual({
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual({
       serviceId: "svc_botox",
       professionalId: "pro_perez",
       startsAt: new Date("2026-06-01T13:00:00.000Z"),
@@ -108,7 +108,7 @@ describe("ConversationWorkflow", () => {
       text: "Turno confirmado para 2026-06-01T13:00:00.000Z. Te vamos a enviar el recordatorio antes del turno."
     });
     expect(repos.getPatient("pat_1")?.fullName).toBe("Ana Gomez");
-    expect(repos.getConversation("conv_1")?.pendingBooking).toBeUndefined();
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toBeUndefined();
     expect(repos.listAppointmentsByPatient("pat_1")).toEqual([
       expect.objectContaining({
         serviceId: "svc_botox",
@@ -184,7 +184,7 @@ describe("ConversationWorkflow", () => {
       id: "pat_1",
       whatsappNumber: "+5491111111111"
     });
-    expect(repos.getConversation("conv_1")).toEqual(
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })).toEqual(
       expect.objectContaining({
         id: "conv_1",
         clinicId: "clinic_1",
@@ -217,7 +217,7 @@ describe("ConversationWorkflow", () => {
       kind: "handoff",
       text: "Te derivo con recepcion para que puedan ayudarte por este mismo chat."
     });
-    expect(repos.getConversation("conv_1")).toEqual(
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })).toEqual(
       expect.objectContaining({
         id: "conv_1",
         botPaused: true

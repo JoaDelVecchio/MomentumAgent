@@ -5,6 +5,7 @@ import { InMemoryRepositories } from "../src/adapters/memory/repositories.js";
 import { SchedulingService } from "../src/application/scheduling/scheduling-service.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
 import { DomainError } from "../src/domain/errors.js";
+import type { Appointment } from "../src/domain/types.js";
 import type { CalendarEvent, CalendarEventInput, FindFreeSlotsInput } from "../src/ports/calendar.js";
 
 class BlockingUpdateCalendar extends FakeCalendar {
@@ -64,8 +65,31 @@ class CapturingCalendar extends FakeCalendar {
   }
 }
 
-function buildContext(calendar = new FakeCalendar(), now = () => new Date("2026-05-29T12:00:00.000Z")) {
-  const repos = new InMemoryRepositories();
+class FailingSaveRepository extends InMemoryRepositories {
+  override saveAppointment(_appointment: Appointment) {
+    throw new Error("database unavailable");
+  }
+}
+
+class FailingAppointmentSaveRepository extends InMemoryRepositories {
+  constructor(private readonly shouldFail: (appointment: Appointment) => boolean) {
+    super();
+  }
+
+  override saveAppointment(appointment: Appointment) {
+    if (this.shouldFail(appointment)) {
+      throw new Error("database unavailable");
+    }
+
+    return super.saveAppointment(appointment);
+  }
+}
+
+function buildContext(
+  calendar = new FakeCalendar(),
+  now = () => new Date("2026-05-29T12:00:00.000Z"),
+  repos = new InMemoryRepositories()
+) {
   const audit = new InMemoryAuditLog();
 
   repos.upsertClinicProfile(
@@ -219,6 +243,51 @@ describe("SchedulingService", () => {
     expect((await audit.list()).map((event) => event.type)).toContain("appointment.created");
   });
 
+  it("cancels a newly-created calendar event when appointment persistence fails", async () => {
+    const calendar = new CapturingCalendar();
+    const audit = new InMemoryAuditLog();
+    const repos = new FailingSaveRepository();
+    repos.upsertClinicProfile(
+      parseClinicProfile({
+        clinicId: "clinic_1",
+        name: "Clinica Demo",
+        timezone: "America/Argentina/Buenos_Aires",
+        services: [
+          {
+            id: "svc_botox",
+            name: "Botox",
+            durationMinutes: 30,
+            priceText: "Desde $120.000",
+            preparation: "Evitar alcohol 24 horas antes.",
+            restrictions: [],
+            professionalIds: ["pro_perez"]
+          }
+        ],
+        professionals: [{ id: "pro_perez", name: "Dra. Perez", calendarId: "cal_perez" }],
+        appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 0, bufferMinutes: 0 },
+        requiredPatientFields: ["fullName"]
+      })
+    );
+    repos.upsertPatient({ id: "pat_1", whatsappNumber: "+5491111111111", fullName: "Ana Gomez" });
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
+    ]);
+    const service = new SchedulingService(repos, calendar, audit, () => new Date("2026-05-29T12:00:00.000Z"));
+
+    await expect(
+      service.bookAppointment({
+        clinicId: "clinic_1",
+        patientId: "pat_1",
+        serviceId: "svc_botox",
+        startsAt: new Date("2026-06-01T13:00:00.000Z"),
+        professionalId: "pro_perez",
+        conversationId: "conv_1"
+      })
+    ).rejects.toThrow("database unavailable");
+
+    expect(calendar.cancelEventInputs).toEqual([{ eventId: "evt_1", calendarId: "cal_perez" }]);
+  });
+
   it("reschedules an appointment into a newly available slot", async () => {
     const { calendar, audit, service } = buildContext();
     calendar.seedAvailability("cal_perez", [
@@ -288,6 +357,67 @@ describe("SchedulingService", () => {
     expect(cancelled.status).toBe("cancelled");
     expect((await calendar.getEvent(appointment.calendarEventId))?.status).toBe("cancelled");
     expect((await audit.list()).map((event) => event.type)).toContain("appointment.cancelled");
+  });
+
+  it("does not cancel the calendar event when cancellation persistence fails", async () => {
+    const calendar = new CapturingCalendar();
+    const repos = new FailingAppointmentSaveRepository((appointment) => appointment.status === "cancelled");
+    const { service } = buildContext(calendar, () => new Date("2026-05-29T12:00:00.000Z"), repos);
+
+    const appointment = await service.bookAppointment({
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      serviceId: "svc_botox",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      professionalId: "pro_perez"
+    });
+
+    await expect(
+      service.cancelAppointment({
+        clinicId: "clinic_1",
+        appointmentId: appointment.id
+      })
+    ).rejects.toThrow("database unavailable");
+
+    expect(calendar.cancelEventInputs).toEqual([]);
+    expect(await calendar.getEvent(appointment.calendarEventId)).toMatchObject({ status: "scheduled" });
+    expect(repos.getAppointment(appointment.id)).toEqual(appointment);
+  });
+
+  it("does not move the calendar event when reschedule persistence fails", async () => {
+    const calendar = new CapturingCalendar();
+    const newStartsAt = new Date("2026-06-02T14:00:00.000Z");
+    const repos = new FailingAppointmentSaveRepository(
+      (appointment) => appointment.startsAt.getTime() === newStartsAt.getTime()
+    );
+    const { service } = buildContext(calendar, () => new Date("2026-05-29T12:00:00.000Z"), repos);
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") },
+      { startsAt: newStartsAt, endsAt: new Date("2026-06-02T14:30:00.000Z") }
+    ]);
+
+    const appointment = await service.bookAppointment({
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      serviceId: "svc_botox",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      professionalId: "pro_perez"
+    });
+
+    await expect(
+      service.rescheduleAppointment({
+        clinicId: "clinic_1",
+        appointmentId: appointment.id,
+        startsAt: newStartsAt
+      })
+    ).rejects.toThrow("database unavailable");
+
+    expect(calendar.updateEventInputs).toEqual([]);
+    expect(await calendar.getEvent(appointment.calendarEventId)).toMatchObject({
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      status: "scheduled"
+    });
+    expect(repos.getAppointment(appointment.id)).toEqual(appointment);
   });
 
   it("uses the appointment calendar id when professional calendar mapping changes later", async () => {

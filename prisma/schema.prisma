@@ -26,10 +26,11 @@ model Clinic {
   auditEvents               AuditEvent[]
   reactivationAttempts      ReactivationAttempt[]
   calendarConnections       CalendarConnection[]
+  processedWebhookDeliveries ProcessedWebhookDelivery[]
 }
 
 model Service {
-  id                   String                @id
+  id                   String
   clinicId             String
   name                 String
   durationMinutes      Int
@@ -41,12 +42,12 @@ model Service {
   appointments         Appointment[]
   patientInterests     PatientInterest[]
 
-  @@unique([clinicId, id])
+  @@id([clinicId, id])
   @@index([clinicId])
 }
 
 model Professional {
-  id                   String                @id
+  id                   String
   clinicId             String
   name                 String
   calendarId           String
@@ -55,7 +56,7 @@ model Professional {
   appointments         Appointment[]
   patientInterests     PatientInterest[]
 
-  @@unique([clinicId, id])
+  @@id([clinicId, id])
   @@unique([clinicId, calendarId])
   @@index([clinicId])
 }
@@ -84,6 +85,11 @@ model Patient {
   interests      PatientInterest[]
 }
 
+model WhatsAppOptOut {
+  whatsappNumber String   @id
+  createdAt      DateTime @default(now())
+}
+
 model Appointment {
   id              String             @id
   clinicId        String
@@ -91,6 +97,7 @@ model Appointment {
   serviceId       String
   professionalId  String
   calendarEventId String
+  calendarId      String
   startsAt        DateTime
   endsAt          DateTime
   status          String
@@ -110,7 +117,7 @@ model Appointment {
 }
 
 model Conversation {
-  id                 String       @id
+  id                 String
   clinicId           String
   patientId          String
   botPaused          Boolean      @default(false)
@@ -119,11 +126,11 @@ model Conversation {
   updatedAt          DateTime     @updatedAt
   clinic             Clinic       @relation(fields: [clinicId], references: [id])
   patient            Patient      @relation(fields: [patientId], references: [id])
-  auditEvents        AuditEvent[]
 
-  @@unique([clinicId, id])
+  @@id([clinicId, id])
   @@index([clinicId, updatedAt])
   @@index([patientId])
+  @@index([id])
 }
 
 model PatientInterest {
@@ -157,7 +164,6 @@ model AuditEvent {
   metadataJson   String
   createdAt      DateTime      @default(now())
   clinic         Clinic        @relation(fields: [clinicId], references: [id])
-  conversation   Conversation? @relation(fields: [clinicId, conversationId], references: [clinicId, id])
 
   @@index([clinicId, createdAt])
   @@index([conversationId, createdAt])
@@ -202,4 +208,22 @@ model CalendarConnection {
 
   @@unique([clinicId, provider])
   @@index([provider])
+}
+
+model ProcessedWebhookDelivery {
+  id                String   @id @default(cuid())
+  provider          String
+  idempotencyKey    String
+  clinicId          String
+  conversationId    String?
+  providerMessageId String?
+  status            String   @default("processed")
+  responseText      String?
+  workflowResult    String?
+  outboundProviderMessageId String?
+  processedAt       DateTime @default(now())
+  clinic            Clinic   @relation(fields: [clinicId], references: [id])
+
+  @@unique([provider, idempotencyKey])
+  @@index([clinicId, processedAt])
 }

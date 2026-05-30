@@ -3,7 +3,7 @@ import { FakeCalendar } from "../adapters/memory/fake-calendar.js";
 import { InMemoryRepositories } from "../adapters/memory/repositories.js";
 import { ConversationWorkflow } from "../application/conversations/conversation-workflow.js";
 import { SchedulingService } from "../application/scheduling/scheduling-service.js";
-import { parseClinicProfile } from "../domain/clinic-profile.js";
+import { buildDemoClinicProfile } from "./demo-clinic-profile.js";
 import type {
   CalendarEvent,
   CalendarEventInput,
@@ -26,40 +26,7 @@ export function buildDevContainer(options: BuildDevContainerOptions = {}) {
   const calendar = options.calendar ?? buildDefaultCalendar(options.calendarProvider);
   const audit = new InMemoryAuditLog();
 
-  repos.upsertClinicProfile(
-    parseClinicProfile({
-      clinicId: "clinic_1",
-      name: "Clinica Demo",
-      timezone: "America/Argentina/Buenos_Aires",
-      services: [
-        {
-          id: "svc_botox",
-          name: "Botox",
-          durationMinutes: 30,
-          priceText: "Desde $120.000",
-          preparation: "Evitar alcohol 24 horas antes.",
-          restrictions: ["Momentum no brinda diagnostico medico por WhatsApp."],
-          professionalIds: ["pro_perez"]
-        }
-      ],
-      professionals: [
-        {
-          id: "pro_perez",
-          name: "Dra. Perez",
-          calendarId: "cal_perez",
-          workingHours: [
-            { day: 1, startTime: "09:00", endTime: "17:00" },
-            { day: 2, startTime: "09:00", endTime: "17:00" },
-            { day: 3, startTime: "09:00", endTime: "17:00" },
-            { day: 4, startTime: "09:00", endTime: "17:00" },
-            { day: 5, startTime: "09:00", endTime: "17:00" }
-          ]
-        }
-      ],
-      appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 1440, bufferMinutes: 0 },
-      requiredPatientFields: ["fullName"]
-    })
-  );
+  repos.upsertClinicProfile(buildDemoClinicProfile());
 
   const firstSlotStart = atUtcHour(addDays(startOfDay(now), 3), 13, 0);
   const secondSlotStart = atUtcHour(addDays(startOfDay(now), 3), 13, 30);
@@ -98,7 +65,7 @@ class MissingGoogleCalendar implements CalendarPort {
   }
 }
 
-function buildDefaultCalendar(calendarProvider: CalendarProvider = "fake"): CalendarPort {
+export function buildDefaultCalendar(calendarProvider: CalendarProvider = "fake"): CalendarPort {
   return calendarProvider === "google" ? new MissingGoogleCalendar() : new FakeCalendar();
 }
 
