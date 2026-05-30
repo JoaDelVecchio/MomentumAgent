@@ -494,6 +494,7 @@ export class PrismaOperationalRepository implements OperationalRepository {
     }
   }
 
+  // Temporary until Task 2 adds schema-backed outbound delivery persistence.
   async claimOutboundDelivery(_input: OutboundDeliveryClaimInput): Promise<OutboundDeliveryClaim> {
     throw new Error("Outbound deliveries are not implemented for PrismaOperationalRepository");
   }

@@ -236,7 +236,7 @@ export class InMemoryRepositories implements OperationalRepository {
   }
 
   markOutboundDeliverySent(input: { key: string; providerMessageId: string; sentAt: Date }) {
-    const delivery = this.requireOutboundDelivery(input.key);
+    const delivery = this.requireClaimedOutboundDelivery(input.key);
     this.outboundDeliveries.set(input.key, {
       ...delivery,
       status: "sent",
@@ -247,7 +247,7 @@ export class InMemoryRepositories implements OperationalRepository {
   }
 
   markOutboundDeliveryBlocked(input: { key: string; reason: string; blockedAt: Date }) {
-    const delivery = this.requireOutboundDelivery(input.key);
+    const delivery = this.requireClaimedOutboundDelivery(input.key);
     this.outboundDeliveries.set(input.key, {
       ...delivery,
       status: "blocked",
@@ -258,7 +258,7 @@ export class InMemoryRepositories implements OperationalRepository {
   }
 
   markOutboundDeliveryFailed(input: { key: string; reason: string; failedAt: Date }) {
-    const delivery = this.requireOutboundDelivery(input.key);
+    const delivery = this.requireClaimedOutboundDelivery(input.key);
     this.outboundDeliveries.set(input.key, {
       ...delivery,
       status: "failed",
@@ -274,6 +274,14 @@ export class InMemoryRepositories implements OperationalRepository {
       throw new Error(`Outbound delivery ${key} not found`);
     }
     return cloneOutboundDelivery(delivery);
+  }
+
+  private requireClaimedOutboundDelivery(key: string) {
+    const delivery = this.requireOutboundDelivery(key);
+    if (delivery.status !== "claimed") {
+      throw new Error(`Outbound delivery ${key} is already ${delivery.status}`);
+    }
+    return delivery;
   }
 }
 

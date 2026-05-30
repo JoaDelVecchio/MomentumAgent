@@ -55,18 +55,7 @@ describe("Outbound delivery repository contract", () => {
     const key = "reminder:appt_1:24h";
     const sentAt = new Date("2026-05-30T12:05:00.000Z");
 
-    await repos.claimOutboundDelivery({
-      key,
-      clinicId: "clinic_1",
-      automationType: "reminder",
-      toWhatsappNumber: "+5491111111111",
-      patientId: "pat_1",
-      conversationId: "conv_1",
-      appointmentId: "appt_1",
-      templateName: "appointment_reminder_24h",
-      metadata: { timezone: "America/Argentina/Buenos_Aires" },
-      now: new Date("2026-05-30T12:00:00.000Z")
-    });
+    await claimOutboundDelivery(repos, { key });
 
     await repos.markOutboundDeliverySent({ key, providerMessageId: "wamid_1", sentAt });
 
@@ -77,6 +66,90 @@ describe("Outbound delivery repository contract", () => {
         providerMessageId: "wamid_1",
         sentAt,
         updatedAt: sentAt
+      })
+    );
+  });
+
+  it("marks the delivery blocked and reads blocked status details back", async () => {
+    const repos = new InMemoryRepositories();
+    const key = "reminder:appt_1:24h";
+    const blockedAt = new Date("2026-05-30T12:10:00.000Z");
+
+    await claimOutboundDelivery(repos, { key });
+
+    await repos.markOutboundDeliveryBlocked({ key, reason: "patient opted out", blockedAt });
+
+    expect(await repos.getOutboundDelivery(key)).toEqual(
+      expect.objectContaining({
+        key,
+        status: "blocked",
+        failureReason: "patient opted out",
+        blockedAt,
+        updatedAt: blockedAt
+      })
+    );
+  });
+
+  it("marks the delivery failed and reads failed status details back", async () => {
+    const repos = new InMemoryRepositories();
+    const key = "reminder:appt_1:24h";
+    const failedAt = new Date("2026-05-30T12:15:00.000Z");
+
+    await claimOutboundDelivery(repos, { key });
+
+    await repos.markOutboundDeliveryFailed({ key, reason: "provider timeout", failedAt });
+
+    expect(await repos.getOutboundDelivery(key)).toEqual(
+      expect.objectContaining({
+        key,
+        status: "failed",
+        failureReason: "provider timeout",
+        failedAt,
+        updatedAt: failedAt
+      })
+    );
+  });
+
+  it("does not allow terminal outbound delivery states to be overwritten", async () => {
+    const repos = new InMemoryRepositories();
+    const key = "reminder:appt_1:24h";
+    const sentAt = new Date("2026-05-30T12:05:00.000Z");
+
+    await claimOutboundDelivery(repos, { key });
+    await repos.markOutboundDeliverySent({ key, providerMessageId: "wamid_1", sentAt });
+
+    expect(() =>
+      repos.markOutboundDeliveryFailed({
+        key,
+        reason: "provider timeout",
+        failedAt: new Date("2026-05-30T12:15:00.000Z")
+      })
+    ).toThrow("Outbound delivery reminder:appt_1:24h is already sent");
+    const delivery = await repos.getOutboundDelivery(key);
+    expect(delivery).toEqual(
+      expect.objectContaining({
+        key,
+        status: "sent",
+        providerMessageId: "wamid_1",
+        sentAt
+      })
+    );
+    expect(delivery).not.toHaveProperty("failureReason");
+    expect(delivery?.failedAt).toBeUndefined();
+  });
+
+  it("does not expose mutable outbound delivery metadata references", async () => {
+    const repos = new InMemoryRepositories();
+    const key = "reminder:appt_1:24h";
+
+    await claimOutboundDelivery(repos, { key });
+
+    const delivery = await repos.getOutboundDelivery(key);
+    delivery!.metadata.timezone = "mutated";
+
+    expect(await repos.getOutboundDelivery(key)).toEqual(
+      expect.objectContaining({
+        metadata: { timezone: "America/Argentina/Buenos_Aires" }
       })
     );
   });
@@ -160,4 +233,19 @@ function conversationFixture(overrides: Partial<Conversation> = {}): Conversatio
     updatedAt: new Date("2026-05-30T10:00:00.000Z"),
     ...overrides
   };
+}
+
+function claimOutboundDelivery(repos: InMemoryRepositories, overrides: { key?: string } = {}) {
+  return repos.claimOutboundDelivery({
+    key: overrides.key ?? "reminder:appt_1:24h",
+    clinicId: "clinic_1",
+    automationType: "reminder",
+    toWhatsappNumber: "+5491111111111",
+    patientId: "pat_1",
+    conversationId: "conv_1",
+    appointmentId: "appt_1",
+    templateName: "appointment_reminder_24h",
+    metadata: { timezone: "America/Argentina/Buenos_Aires" },
+    now: new Date("2026-05-30T12:00:00.000Z")
+  });
 }
