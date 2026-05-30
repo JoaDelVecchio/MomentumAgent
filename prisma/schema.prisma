@@ -110,6 +110,7 @@ model Professional {
   clinicId             String
   name                 String
   calendarId           String
+  workingHoursJson     String                @default("[]")
   clinic               Clinic                @relation(fields: [clinicId], references: [id])
   serviceProfessionals ServiceProfessional[]
   appointments         Appointment[]

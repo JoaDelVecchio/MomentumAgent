@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
-import type { Appointment, ClinicProfile, Id, Patient } from "../../domain/types.js";
+import { parseClinicProfile } from "../../domain/clinic-profile.js";
+import { patientFields, type Appointment, type ClinicProfile, type Id, type Patient, type PatientField, type WorkingWindow } from "../../domain/types.js";
 import type {
   Conversation,
   ConversationByPatientLookup,
@@ -22,6 +23,40 @@ import type {
 } from "../../ports/repositories.js";
 
 type PatientRecord = { id: string; whatsappNumber: string; fullName: string | null };
+
+type ServiceRecord = {
+  id: string;
+  name: string;
+  durationMinutes: number;
+  priceText: string;
+  preparation: string;
+  restrictionsJson: string;
+};
+
+type ProfessionalRecord = {
+  id: string;
+  name: string;
+  calendarId: string;
+  workingHoursJson: string;
+};
+
+type ServiceProfessionalRecord = {
+  serviceId: string;
+  professionalId: string;
+};
+
+type ClinicProfileRecord = {
+  id: string;
+  name: string;
+  timezone: string;
+  minimumNoticeMinutes: number;
+  cancellationNoticeMinutes: number;
+  bufferMinutes: number;
+  requiredPatientFieldsJson: string;
+  services: ServiceRecord[];
+  professionals: ProfessionalRecord[];
+  serviceProfessionals: ServiceProfessionalRecord[];
+};
 
 type AppointmentRecord = {
   id: string;
@@ -151,11 +186,13 @@ export class PrismaOperationalRepository implements OperationalRepository {
             id: professional.id,
             clinicId: profile.clinicId,
             name: professional.name,
-            calendarId: professional.calendarId
+            calendarId: professional.calendarId,
+            workingHoursJson: JSON.stringify(professional.workingHours)
           },
           update: {
             name: professional.name,
-            calendarId: professional.calendarId
+            calendarId: professional.calendarId,
+            workingHoursJson: JSON.stringify(professional.workingHours)
           }
         });
       }
@@ -168,7 +205,25 @@ export class PrismaOperationalRepository implements OperationalRepository {
 
   async getClinicProfile(clinicId: Id): Promise<ClinicProfile | undefined> {
     const profile = this.clinicProfiles.get(clinicId);
-    return profile ? cloneClinicProfile(profile) : undefined;
+    if (profile) {
+      return cloneClinicProfile(profile);
+    }
+
+    const persisted = await this.prisma.clinic.findUnique({
+      where: { id: clinicId },
+      include: {
+        services: { orderBy: { id: "asc" } },
+        professionals: { orderBy: { id: "asc" } },
+        serviceProfessionals: { orderBy: [{ serviceId: "asc" }, { professionalId: "asc" }] }
+      }
+    });
+    if (!persisted) {
+      return undefined;
+    }
+
+    const hydrated = toClinicProfile(persisted);
+    this.clinicProfiles.set(clinicId, cloneClinicProfile(hydrated));
+    return cloneClinicProfile(hydrated);
   }
 
   async upsertPatient(patient: Patient): Promise<void> {
@@ -729,6 +784,48 @@ function toPatient(record: PatientRecord): Patient {
   };
 }
 
+function toClinicProfile(record: ClinicProfileRecord): ClinicProfile {
+  const serviceProfessionalIds = new Map<string, string[]>();
+  const linkedProfessionalIds = new Set<string>();
+  for (const link of record.serviceProfessionals) {
+    linkedProfessionalIds.add(link.professionalId);
+    const professionalIds = serviceProfessionalIds.get(link.serviceId) ?? [];
+    professionalIds.push(link.professionalId);
+    serviceProfessionalIds.set(link.serviceId, professionalIds);
+  }
+
+  return parseClinicProfile({
+    clinicId: record.id,
+    name: record.name,
+    timezone: record.timezone,
+    services: record.services
+      .map((service) => ({
+        id: service.id,
+        name: service.name,
+        durationMinutes: service.durationMinutes,
+        priceText: service.priceText,
+        preparation: service.preparation,
+        restrictions: parseStringArray(service.restrictionsJson),
+        professionalIds: serviceProfessionalIds.get(service.id) ?? []
+      }))
+      .filter((service) => service.professionalIds.length > 0),
+    professionals: record.professionals
+      .filter((professional) => linkedProfessionalIds.has(professional.id))
+      .map((professional) => ({
+        id: professional.id,
+        name: professional.name,
+        calendarId: professional.calendarId,
+        workingHours: parseWorkingHours(professional.workingHoursJson)
+      })),
+    appointmentRules: {
+      minimumNoticeMinutes: record.minimumNoticeMinutes,
+      cancellationNoticeMinutes: record.cancellationNoticeMinutes,
+      bufferMinutes: record.bufferMinutes
+    },
+    requiredPatientFields: parsePatientFields(record.requiredPatientFieldsJson)
+  });
+}
+
 function toAppointment(record: AppointmentRecord): Appointment {
   return {
     id: record.id,
@@ -850,6 +947,33 @@ function parseOutboundMetadata(metadataJson: string): Record<string, string> {
   }
 
   return { ...(metadata as Record<string, string>) };
+}
+
+function parseStringArray(json: string): string[] {
+  const value = JSON.parse(json) as unknown;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new Error("Expected JSON string array");
+  }
+  return value;
+}
+
+function parsePatientFields(json: string): PatientField[] {
+  const fields = parseStringArray(json);
+  const allowed = new Set<string>(patientFields);
+  for (const field of fields) {
+    if (!allowed.has(field)) {
+      throw new Error(`Unknown patient field: ${field}`);
+    }
+  }
+  return fields as PatientField[];
+}
+
+function parseWorkingHours(json: string): WorkingWindow[] {
+  const value = JSON.parse(json) as unknown;
+  if (!Array.isArray(value)) {
+    throw new Error("Professional working hours must be an array");
+  }
+  return value as WorkingWindow[];
 }
 
 function isPrismaUniqueConflict(error: unknown): boolean {

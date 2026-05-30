@@ -206,6 +206,11 @@ export function registerOnboardingRoutes(app: FastifyInstance, options: Onboardi
       return reply.status(400).send({ error: "invalid_clinic" });
     }
 
+    const existing = await options.service.getClinicSetup(params.data.clinicId);
+    if (!existing) {
+      return reply.status(404).send({ error: "not_found" });
+    }
+
     const readiness = await options.service.readiness(params.data.clinicId);
     if (!readiness.ready) {
       return reply.status(409).send({ error: "clinic_not_ready", missing: readiness.missing });

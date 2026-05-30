@@ -92,6 +92,21 @@ describe("onboarding routes", () => {
     await app.close();
   });
 
+  it("returns not found when activating a missing clinic", async () => {
+    const context = buildContext();
+    const app = buildApp({ onboarding: { service: context.service, adminToken: "secret" } });
+
+    const activation = await app.inject({
+      method: "POST",
+      url: "/internal/onboarding/clinics/missing/activate",
+      headers: { authorization: "Bearer secret" }
+    });
+
+    expect(activation.statusCode).toBe(404);
+    expect(activation.json()).toEqual({ error: "not_found" });
+    await app.close();
+  });
+
   it("converts leads and updates clinic payment and readiness flags", async () => {
     const context = buildContext();
     const app = buildApp({ onboarding: { service: context.service, adminToken: "secret" } });

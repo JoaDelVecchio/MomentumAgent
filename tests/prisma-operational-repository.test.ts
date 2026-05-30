@@ -142,6 +142,40 @@ describe("PrismaOperationalRepository core state", () => {
     expect(await repos.getClinicProfile("clinic_1")).toEqual(demoProfile());
   });
 
+  it("hydrates persisted clinic profiles from a fresh repository instance", async () => {
+    const persisted = operationalProfile({
+      clinicId: "clinic_hydrate",
+      serviceId: "svc_hydrate",
+      professionals: [
+        { id: "pro_hydrate_a", calendarId: "cal_hydrate_a", name: "Dra. A" },
+        { id: "pro_hydrate_b", calendarId: "cal_hydrate_b", name: "Dra. B" }
+      ],
+      serviceProfessionalIds: ["pro_hydrate_b"]
+    });
+
+    await repos.upsertClinicProfile(persisted);
+
+    const freshRepos = new PrismaOperationalRepository(prisma);
+
+    expect(await freshRepos.getClinicProfile("clinic_hydrate")).toEqual({
+      ...persisted,
+      services: [
+        expect.objectContaining({
+          id: "svc_hydrate",
+          professionalIds: ["pro_hydrate_b"]
+        })
+      ],
+      professionals: [
+        {
+          id: "pro_hydrate_b",
+          name: "Dra. B",
+          calendarId: "cal_hydrate_b",
+          workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
+        }
+      ]
+    });
+  });
+
   it("persists same service and professional ids independently per clinic", async () => {
     await repos.upsertClinicProfile(
       operationalProfile({
