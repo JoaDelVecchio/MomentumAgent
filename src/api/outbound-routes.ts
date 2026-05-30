@@ -5,6 +5,7 @@ import type {
   OutboundAutomationService,
   OutboundAutomationSummary
 } from "../application/outbound/outbound-automation-service.js";
+import type { ClinicActivationGuard } from "../ports/activation.js";
 
 const runOutboundSchema = z.object({
   clinicId: z.string().min(1),
@@ -18,6 +19,7 @@ const zeroSummary: OutboundAutomationSummary = { sent: 0, blocked: 0, failed: 0,
 export type OutboundAutomationRoutesOptions = {
   token: string;
   service: Pick<OutboundAutomationService, "runDueReminders" | "runDueReactivations">;
+  activation?: ClinicActivationGuard;
 };
 
 export function registerOutboundAutomationRoutes(
@@ -36,6 +38,10 @@ export function registerOutboundAutomationRoutes(
 
     const now = parsed.data.now ?? new Date();
     const input = { clinicId: parsed.data.clinicId, now };
+    if (options.activation && !(await options.activation.isClinicActive(input.clinicId))) {
+      return reply.status(409).send({ error: "clinic_inactive" });
+    }
+
     const reminders =
       parsed.data.reminders === false
         ? zeroSummary

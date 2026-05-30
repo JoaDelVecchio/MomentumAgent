@@ -1,4 +1,5 @@
 import type { AuditLogPort } from "../../ports/audit-log.js";
+import type { ClinicActivationGuard } from "../../ports/activation.js";
 import type { CalendarPort } from "../../ports/calendar.js";
 import type { Conversation, OperationalRepository, OutboundDeliveryRecord } from "../../ports/repositories.js";
 import type { Appointment, ClinicProfile, Patient, TimeSlot } from "../../domain/types.js";
@@ -21,6 +22,7 @@ export type OutboundAutomationServiceOptions = {
   calendar: CalendarPort;
   templateService: OutboundTemplateService;
   audit: AuditLogPort;
+  clinicActivation?: ClinicActivationGuard;
 };
 
 type ReminderBlockReason =
@@ -45,6 +47,10 @@ export class OutboundAutomationService {
   constructor(private readonly options: OutboundAutomationServiceOptions) {}
 
   async runDueReminders(input: { clinicId: string; now: Date }): Promise<OutboundAutomationSummary> {
+    if (await this.isClinicInactive(input.clinicId)) {
+      return emptySummary();
+    }
+
     const profile = await this.requireProfile(input.clinicId);
     const summary = emptySummary();
     const appointments = await this.options.repos.listScheduledAppointments({
@@ -90,6 +96,10 @@ export class OutboundAutomationService {
   }
 
   async runDueReactivations(input: { clinicId: string; now: Date }): Promise<OutboundAutomationSummary> {
+    if (await this.isClinicInactive(input.clinicId)) {
+      return emptySummary();
+    }
+
     const profile = await this.requireProfile(input.clinicId);
     const summary = emptySummary();
     const conversations = await this.options.repos.listConversationsByClinic(input.clinicId);
@@ -123,6 +133,10 @@ export class OutboundAutomationService {
     slot: TimeSlot;
     now: Date;
   }): Promise<OutboundAutomationSummary> {
+    if (await this.isClinicInactive(input.clinicId)) {
+      return emptySummary();
+    }
+
     const profile = await this.requireProfile(input.clinicId);
     const summary = emptySummary();
     const interest = matchFreedSlot({
@@ -677,6 +691,10 @@ export class OutboundAutomationService {
       throw new Error(`Clinic ${clinicId} not configured`);
     }
     return profile;
+  }
+
+  private async isClinicInactive(clinicId: string): Promise<boolean> {
+    return this.options.clinicActivation ? !(await this.options.clinicActivation.isClinicActive(clinicId)) : false;
   }
 
   private async blockDelivery(input: {

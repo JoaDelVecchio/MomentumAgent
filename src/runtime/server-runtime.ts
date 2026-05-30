@@ -23,6 +23,7 @@ import { readGoogleCalendarConfig, type GoogleCalendarConfig } from "../config/g
 import type { WhatsAppConfig } from "../config/whatsapp.js";
 import { buildDemoClinicProfile } from "../dev/demo-clinic-profile.js";
 import { buildDefaultCalendar, type CalendarProvider } from "../dev/seed.js";
+import type { ClinicActivationGuard } from "../ports/activation.js";
 import type { CalendarPort } from "../ports/calendar.js";
 import type {
   CalendarCredentialInput,
@@ -69,6 +70,7 @@ export async function buildWhatsAppRuntime(input: {
   clinicId?: string;
   aiConfig?: AIConfig;
   interpreter?: ConversationInterpreter;
+  clinicActivation?: ClinicActivationGuard;
 }) {
   const clinicId = input.clinicId ?? readRuntimeClinicId();
   const repos = new PrismaOperationalRepository(input.prisma);
@@ -84,7 +86,8 @@ export async function buildWhatsAppRuntime(input: {
     repos,
     calendar,
     templateService,
-    audit
+    audit,
+    clinicActivation: input.clinicActivation
   });
   const scheduling = new SchedulingService(
     repos,

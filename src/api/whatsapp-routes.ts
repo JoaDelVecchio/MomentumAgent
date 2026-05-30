@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { KapsoWebhookPayloadError, normalizeKapsoInboundMessage } from "../adapters/whatsapp/kapso/types.js";
 import type { WhatsAppInboundService } from "../application/messaging/whatsapp-inbound-service.js";
+import type { ClinicActivationGuard } from "../ports/activation.js";
 import { CalendarInfrastructureError } from "../ports/calendar.js";
 import { WhatsAppProviderError } from "../ports/messaging.js";
 import { verifyKapsoWebhookSignature } from "../adapters/whatsapp/kapso/signature.js";
@@ -9,6 +10,7 @@ export type WhatsAppKapsoWebhookRoutesOptions = {
   secret: string;
   phoneNumberClinicMap: Record<string, string>;
   inboundService: WhatsAppInboundService;
+  activation?: ClinicActivationGuard;
 };
 
 export function registerWhatsAppRoutes(app: FastifyInstance, options: WhatsAppKapsoWebhookRoutesOptions) {
@@ -46,6 +48,10 @@ export function registerWhatsAppRoutes(app: FastifyInstance, options: WhatsAppKa
       const clinicId = options.phoneNumberClinicMap[providerPhoneNumberId];
       if (!clinicId) {
         return reply.status(400).send({ error: "unknown_provider_phone_number_id" });
+      }
+
+      if (options.activation && !(await options.activation.isClinicActive(clinicId))) {
+        return reply.send({ status: "ignored", reason: "clinic_inactive" });
       }
 
       try {

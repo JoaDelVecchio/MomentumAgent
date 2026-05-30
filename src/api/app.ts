@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import type { GoogleOAuthService } from "../adapters/google/google-oauth.js";
 import type { CalendarProvider } from "../dev/seed.js";
+import type { ClinicActivationGuard } from "../ports/activation.js";
 import type { CalendarPort } from "../ports/calendar.js";
 import { registerGoogleCalendarRoutes } from "./google-calendar-routes.js";
 import {
@@ -24,6 +25,7 @@ type BuildAppOptions = {
   whatsappKapsoWebhook?: WhatsAppKapsoWebhookRoutesOptions;
   outboundAutomation?: OutboundAutomationRoutesOptions;
   onboarding?: OnboardingRoutesOptions;
+  clinicActivation?: ClinicActivationGuard;
 };
 
 export function buildApp(options: BuildAppOptions = {}) {
@@ -52,11 +54,17 @@ export function buildApp(options: BuildAppOptions = {}) {
   }
 
   if (options.whatsappKapsoWebhook) {
-    registerWhatsAppRoutes(app, options.whatsappKapsoWebhook);
+    registerWhatsAppRoutes(app, {
+      ...options.whatsappKapsoWebhook,
+      activation: options.whatsappKapsoWebhook.activation ?? options.clinicActivation
+    });
   }
 
   if (options.outboundAutomation) {
-    registerOutboundAutomationRoutes(app, options.outboundAutomation);
+    registerOutboundAutomationRoutes(app, {
+      ...options.outboundAutomation,
+      activation: options.outboundAutomation.activation ?? options.clinicActivation
+    });
   }
 
   if (options.onboarding) {

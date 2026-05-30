@@ -26,6 +26,15 @@ const sharedPrisma =
     : undefined;
 const googleRuntime =
   calendarProvider === "google" ? await buildGoogleCalendarRuntime({ prisma: requirePrisma(sharedPrisma) }) : undefined;
+const onboardingService = adminConfig.enabled
+  ? new OnboardingService({
+      onboarding: new PrismaOnboardingRepository(requireOnboardingPrisma(sharedPrisma)),
+      operational: new PrismaOperationalRepository(requireOnboardingPrisma(sharedPrisma))
+    })
+  : undefined;
+const clinicActivation = onboardingService
+  ? { isClinicActive: (clinicId: string) => onboardingService.isClinicActive(clinicId) }
+  : undefined;
 const whatsappRuntime =
   whatsappConfig.provider === "kapso"
     ? await buildWhatsAppRuntime({
@@ -33,15 +42,10 @@ const whatsappRuntime =
         config: whatsappConfig,
         calendarProvider,
         calendar: googleRuntime?.calendar,
-        clinicId: readRuntimeClinicId(process.env)
+        clinicId: readRuntimeClinicId(process.env),
+        clinicActivation
       })
     : undefined;
-const onboardingService = adminConfig.enabled
-  ? new OnboardingService({
-      onboarding: new PrismaOnboardingRepository(requireOnboardingPrisma(sharedPrisma)),
-      operational: new PrismaOperationalRepository(requireOnboardingPrisma(sharedPrisma))
-    })
-  : undefined;
 
 const app = buildApp({
   enableSimulationRoutes: process.env.ENABLE_SIMULATION_API === "true",
@@ -50,6 +54,7 @@ const app = buildApp({
   googleCalendarOAuthService: googleRuntime?.oauthService,
   googleCalendarSetupToken: googleRuntime?.setupToken,
   whatsappKapsoWebhook: whatsappRuntime?.webhook,
+  clinicActivation,
   outboundAutomation:
     outboundConfig.enabled && whatsappRuntime
       ? { token: outboundConfig.token, service: whatsappRuntime.outboundAutomation }
