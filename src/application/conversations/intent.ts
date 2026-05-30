@@ -21,6 +21,7 @@ export function interpretIntent(text: string): ConversationIntent {
     containsAny(normalized, [
       "reprogram",
       "cambiar turno",
+      "cambiar mi turno",
       "mover turno",
       "modificar turno",
       "pasar turno",

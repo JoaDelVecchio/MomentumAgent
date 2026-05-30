@@ -89,6 +89,8 @@ OPENAI_TIMEOUT_MS=1500
 
 The model only returns structured conversation understanding. Calendar availability, booking, rescheduling, cancellation, and WhatsApp side effects remain controlled by application code.
 
+Representative Spanish WhatsApp cases live in `tests/fixtures/conversation-evals.ts`. They are deterministic fixtures today; live OpenAI eval execution should be added only after the MVP behavior is stable enough to compare model output over time.
+
 Simulate an inbound WhatsApp message:
 
 ```bash

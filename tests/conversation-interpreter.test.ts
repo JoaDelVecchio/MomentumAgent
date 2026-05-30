@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { RulesConversationInterpreter } from "../src/application/conversations/rules-interpreter.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
+import { conversationEvalCases } from "./fixtures/conversation-evals.js";
 
 const profile = parseClinicProfile({
   clinicId: "clinic_1",
@@ -63,5 +64,20 @@ describe("RulesConversationInterpreter", () => {
         safetyReason: "patient_requested_human"
       })
     );
+  });
+
+  it.each(
+    conversationEvalCases.filter((testCase) => ["reschedule", "handoff"].includes(testCase.expected.intent ?? ""))
+  )("covers deterministic eval: $name", async ({ messageText, expected }) => {
+    const result = await new RulesConversationInterpreter().interpret({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      messageText,
+      now: new Date("2026-05-29T12:00:00.000Z"),
+      clinicProfile: profile
+    });
+
+    expect(result).toEqual(expect.objectContaining(expected));
   });
 });
