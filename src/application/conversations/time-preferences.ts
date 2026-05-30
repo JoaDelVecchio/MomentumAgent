@@ -8,8 +8,14 @@ export function resolveSlotSearchRange(input: {
   understanding: ConversationUnderstanding;
 }) {
   const normalized = input.understanding.normalizedTimePreference;
-  const from = normalized?.from && normalized.from > input.defaultFrom ? normalized.from : input.defaultFrom;
-  const to = normalized?.to && normalized.to < input.defaultTo ? normalized.to : input.defaultTo;
+  const from =
+    normalized?.from && normalized.from >= input.defaultFrom && normalized.from <= input.defaultTo
+      ? normalized.from
+      : input.defaultFrom;
+  const to =
+    normalized?.to && normalized.to >= input.defaultFrom && normalized.to <= input.defaultTo
+      ? normalized.to
+      : input.defaultTo;
   return { from, to };
 }
 
