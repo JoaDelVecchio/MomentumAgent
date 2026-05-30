@@ -1,8 +1,9 @@
 import type { AuditLogPort } from "../../ports/audit-log.js";
 import type { CalendarPort } from "../../ports/calendar.js";
 import type { Conversation, OperationalRepository, OutboundDeliveryRecord } from "../../ports/repositories.js";
-import type { Appointment, ClinicProfile, Patient } from "../../domain/types.js";
+import type { Appointment, ClinicProfile, Patient, TimeSlot } from "../../domain/types.js";
 import { OutboundTemplateService } from "../messaging/outbound-template-service.js";
+import { matchFreedSlot } from "./freed-slot-service.js";
 import { isInsideQuietHours } from "./quiet-hours.js";
 import { canReactivate } from "./reactivation-policy.js";
 import { type ReminderKind, shouldSendReminder } from "./reminder-policy.js";
@@ -33,7 +34,9 @@ type ReminderBlockReason =
 type ReminderTemplateKind = "reminder_72h" | "reminder_24h" | "reminder_same_day";
 type ReactivationBlockReason = "missing_patient" | "missing_service" | "opt_out" | "future_appointment";
 type TemporaryReactivationBlockReason = "quiet_hours" | "handoff_paused";
-type OutboundBlockReason = ReminderBlockReason | ReactivationBlockReason;
+type FreedSlotBlockReason = "missing_patient" | "missing_service" | "opt_out";
+type TemporaryFreedSlotBlockReason = "quiet_hours" | "handoff_paused";
+type OutboundBlockReason = ReminderBlockReason | ReactivationBlockReason | FreedSlotBlockReason;
 type ReactivationTemplateKind = "reactivation_1" | "reactivation_2";
 
 export class OutboundAutomationService {
@@ -102,6 +105,148 @@ export class OutboundAutomationService {
         conversation,
         profile,
         attempt,
+        now: input.now,
+        summary
+      });
+    }
+
+    return summary;
+  }
+
+  async handleFreedSlot(input: {
+    clinicId: string;
+    serviceId: string;
+    sourceAppointmentId: string;
+    slot: TimeSlot;
+    now: Date;
+  }): Promise<OutboundAutomationSummary> {
+    const profile = await this.requireProfile(input.clinicId);
+    const summary = emptySummary();
+    const interest = matchFreedSlot({
+      clinicId: input.clinicId,
+      serviceId: input.serviceId,
+      slot: input.slot,
+      interests: await this.options.repos.listActiveInterests()
+    });
+
+    if (!interest) {
+      return summary;
+    }
+
+    const patient = await this.options.repos.getPatient(interest.patientId);
+    const service = profile.services.find((candidate) => candidate.id === input.serviceId);
+    const conversations = patient
+      ? await this.options.repos.listConversationsByPatient({
+          clinicId: input.clinicId,
+          patientId: patient.id
+        })
+      : [];
+
+    if (patient && service && !(await this.options.repos.isOptedOut(patient.whatsappNumber))) {
+      const temporaryBlockReason = this.temporaryFreedSlotBlockReason({
+        conversations,
+        profile,
+        now: input.now
+      });
+      if (temporaryBlockReason) {
+        summary.blocked += 1;
+        await this.auditTemporaryFreedSlotBlock({
+          clinicId: input.clinicId,
+          conversationId: conversations[0]?.id,
+          patient,
+          sourceAppointmentId: input.sourceAppointmentId,
+          interestId: interest.id,
+          reason: temporaryBlockReason
+        });
+        return summary;
+      }
+    }
+
+    const claim = await this.options.repos.claimOutboundDelivery({
+      key: freedSlotDeliveryKey(input.sourceAppointmentId, interest.id, input.slot.startsAt),
+      clinicId: input.clinicId,
+      automationType: "freed_slot",
+      toWhatsappNumber: patient?.whatsappNumber ?? "",
+      patientId: interest.patientId,
+      conversationId: conversations[0]?.id,
+      templateName: "freed_slot_offer",
+      metadata: {
+        interestId: interest.id,
+        serviceId: input.serviceId,
+        sourceAppointmentId: input.sourceAppointmentId,
+        slotStartsAt: input.slot.startsAt.toISOString()
+      },
+      now: input.now
+    });
+
+    if (claim.kind === "existing") {
+      summary.skipped += 1;
+      return summary;
+    }
+
+    try {
+      if (!patient) {
+        summary.blocked += 1;
+        await this.blockDelivery({ delivery: claim.delivery, reason: "missing_patient", now: input.now });
+        return summary;
+      }
+
+      if (await this.options.repos.isOptedOut(patient.whatsappNumber)) {
+        summary.blocked += 1;
+        await this.blockDelivery({ delivery: claim.delivery, reason: "opt_out", now: input.now });
+        return summary;
+      }
+
+      if (!service) {
+        summary.blocked += 1;
+        await this.blockDelivery({ delivery: claim.delivery, reason: "missing_service", now: input.now });
+        return summary;
+      }
+
+      const result = await this.options.templateService.sendApprovedTemplate(
+        buildOutboundTemplate({
+          clinicId: input.clinicId,
+          to: patient.whatsappNumber,
+          kind: "freed_slot_offer",
+          parameters: {
+            clinicName: profile.name,
+            serviceName: service.name,
+            appointmentTimeText: formatAppointmentTime(input.slot.startsAt, profile.timezone)
+          }
+        })
+      );
+
+      if (result.status === "blocked_opt_out") {
+        summary.blocked += 1;
+        await this.blockDelivery({ delivery: claim.delivery, reason: "opt_out", now: input.now });
+        return summary;
+      }
+
+      await this.options.repos.markOutboundDeliverySent({
+        key: claim.delivery.key,
+        providerMessageId: result.providerMessageId,
+        sentAt: input.now
+      });
+      summary.sent += 1;
+      await this.options.audit.record({
+        clinicId: claim.delivery.clinicId,
+        conversationId: claim.delivery.conversationId,
+        type: "outbound.freed_slot.sent",
+        message: "Sent freed-slot offer",
+        metadata: {
+          key: claim.delivery.key,
+          patientId: patient.id,
+          interestId: interest.id,
+          serviceId: input.serviceId,
+          sourceAppointmentId: input.sourceAppointmentId,
+          slotStartsAt: input.slot.startsAt.toISOString(),
+          providerMessageId: result.providerMessageId
+        }
+      });
+    } catch (error) {
+      await this.handleClaimedDeliveryError({
+        delivery: claim.delivery,
+        reason: errorMessage(error),
         now: input.now,
         summary
       });
@@ -455,6 +600,22 @@ export class OutboundAutomationService {
     return undefined;
   }
 
+  private temporaryFreedSlotBlockReason(input: {
+    conversations: Conversation[];
+    profile: ClinicProfile;
+    now: Date;
+  }): TemporaryFreedSlotBlockReason | undefined {
+    if (input.conversations.some((conversation) => conversation.botPaused)) {
+      return "handoff_paused";
+    }
+
+    if (isInsideQuietHours({ now: input.now, timezone: input.profile.timezone })) {
+      return "quiet_hours";
+    }
+
+    return undefined;
+  }
+
   private async nextReactivationAttempt(conversation: Conversation, now: Date): Promise<1 | 2 | undefined> {
     const first = await this.options.repos.getOutboundDelivery(reactivationDeliveryKey(conversation.id, 1));
 
@@ -580,6 +741,26 @@ export class OutboundAutomationService {
     }
   }
 
+  private async auditTemporaryFreedSlotBlock(input: {
+    clinicId: string;
+    conversationId?: string;
+    patient: Patient;
+    sourceAppointmentId: string;
+    interestId: string;
+    reason: TemporaryFreedSlotBlockReason;
+  }): Promise<void> {
+    try {
+      await this.auditBlocked({
+        clinicId: input.clinicId,
+        conversationId: input.conversationId,
+        patientId: input.patient.id,
+        reason: input.reason
+      });
+    } catch {
+      // Temporary freed-slot blocks must not consume the delivery key.
+    }
+  }
+
   private async failDelivery(input: {
     delivery: OutboundDeliveryRecord;
     reason: string;
@@ -656,6 +837,10 @@ function reminderTemplateKind(kind: Exclude<ReminderKind, "none">): ReminderTemp
 
 function reactivationDeliveryKey(conversationId: string, attempt: 1 | 2): string {
   return `reactivation:${conversationId}:${attempt}`;
+}
+
+function freedSlotDeliveryKey(sourceAppointmentId: string, interestId: string, slotStartsAt: Date): string {
+  return `freed-slot:${sourceAppointmentId}:${interestId}:${slotStartsAt.toISOString()}`;
 }
 
 function reactivationTemplateName(attempt: 1 | 2): string {

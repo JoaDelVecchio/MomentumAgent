@@ -1,5 +1,5 @@
 import { DomainError } from "../../domain/errors.js";
-import type { Appointment, ClinicProfile } from "../../domain/types.js";
+import type { Appointment, ClinicProfile, TimeSlot } from "../../domain/types.js";
 import type { AuditLogPort } from "../../ports/audit-log.js";
 import { CalendarAvailabilityError, type CalendarPort, type CalendarSlot } from "../../ports/calendar.js";
 import type { OperationalRepository } from "../../ports/repositories.js";
@@ -13,12 +13,22 @@ type BookAppointmentInput = {
   conversationId?: string;
 };
 
+export type FreedSlotHandler = {
+  handleFreedSlot(input: {
+    clinicId: string;
+    serviceId: string;
+    sourceAppointmentId: string;
+    slot: TimeSlot;
+  }): Promise<void>;
+};
+
 export class SchedulingService {
   constructor(
     private readonly repos: OperationalRepository,
     private readonly calendar: CalendarPort,
     private readonly audit: AuditLogPort,
-    private readonly now: () => Date = () => new Date()
+    private readonly now: () => Date = () => new Date(),
+    private readonly freedSlotHandler?: FreedSlotHandler
   ) {}
 
   async findSlots(input: {
@@ -158,6 +168,7 @@ export class SchedulingService {
         message: "Cancelled appointment",
         metadata: { appointmentId: appointment.id }
       });
+      await this.notifyFreedSlot(appointment);
       return cancelled;
     });
   }
@@ -246,6 +257,7 @@ export class SchedulingService {
         message: "Rescheduled appointment",
         metadata: { appointmentId: appointment.id }
       });
+      await this.notifyFreedSlot(appointment);
 
       return updated;
     });
@@ -267,6 +279,32 @@ export class SchedulingService {
 
   private minimumBookableStart(profile: ClinicProfile) {
     return addMinutes(this.now(), profile.appointmentRules.minimumNoticeMinutes);
+  }
+
+  private async notifyFreedSlot(appointment: Appointment): Promise<void> {
+    if (!this.freedSlotHandler) {
+      return;
+    }
+
+    try {
+      await this.freedSlotHandler.handleFreedSlot({
+        clinicId: appointment.clinicId,
+        serviceId: appointment.serviceId,
+        sourceAppointmentId: appointment.id,
+        slot: appointmentToSlot(appointment)
+      });
+    } catch (error) {
+      await this.audit.record({
+        clinicId: appointment.clinicId,
+        type: "outbound.freed_slot.failed",
+        message: "Failed freed-slot outbound trigger",
+        metadata: {
+          appointmentId: appointment.id,
+          serviceId: appointment.serviceId,
+          reason: errorMessage(error)
+        }
+      });
+    }
   }
 
   private async createCalendarEvent(
@@ -315,6 +353,19 @@ function addMinutes(date: Date, minutes: number) {
 
 function maxDate(first: Date, second: Date) {
   return first > second ? first : second;
+}
+
+function appointmentToSlot(appointment: Appointment): TimeSlot {
+  return {
+    professionalId: appointment.professionalId,
+    calendarId: appointment.calendarId,
+    startsAt: appointment.startsAt,
+    endsAt: appointment.endsAt
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function buildAvailabilityContext(
