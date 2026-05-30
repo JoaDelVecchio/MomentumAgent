@@ -91,9 +91,10 @@ Add internal calendar onboarding endpoints protected by the same admin token use
 - `GET /internal/onboarding/clinics/:clinicId/google-calendar/status`
   - returns whether credentials exist, whether required scopes are present, and whether reconnect is required.
 
-- `GET /internal/onboarding/clinics/:clinicId/google-calendar/start`
-  - redirects the authenticated operator to Google OAuth for the selected clinic.
-  - supports a signed return path back to the web onboarding page after callback.
+- `POST /internal/onboarding/clinics/:clinicId/google-calendar/start`
+  - returns `{ authorizationUrl }` for the authenticated operator.
+  - avoids putting the internal admin token in a browser navigation URL.
+  - includes a signed return path back to the web onboarding page after callback.
 
 - `GET /internal/onboarding/clinics/:clinicId/google-calendar/calendars`
   - returns discovered calendars after validating admin auth and clinic existence.
