@@ -6,6 +6,8 @@ import {
   OnboardingTestModeError,
   type OnboardingTestModeService
 } from "../application/onboarding/test-mode-service.js";
+import { parseClinicProfile, type ClinicProfileInput } from "../domain/clinic-profile.js";
+import { DomainError } from "../domain/errors.js";
 
 const leadSchema = z.object({
   contactName: z.string().trim().min(1),
@@ -77,6 +79,7 @@ export type OnboardingRoutesOptions = {
     | "getClinicSetup"
     | "updatePaymentStatus"
     | "updateReadinessFlags"
+    | "saveClinicProfile"
     | "readiness"
     | "activateClinic"
     | "pauseClinic"
@@ -203,6 +206,30 @@ export function registerOnboardingRoutes(app: FastifyInstance, options: Onboardi
     } catch (error) {
       if (isNotFoundError(error)) {
         return reply.status(404).send({ error: "not_found" });
+      }
+      throw error;
+    }
+  });
+
+  app.put("/internal/onboarding/clinics/:clinicId/profile", async (request, reply) => {
+    if (!isAuthorized(request.headers.authorization, options.adminToken)) {
+      return reply.status(401).send({ error: "unauthorized" });
+    }
+
+    const params = clinicParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({ error: "invalid_clinic_profile" });
+    }
+
+    try {
+      const body = typeof request.body === "object" && request.body !== null ? request.body : {};
+      const profileInput = { ...(body as Record<string, unknown>), clinicId: params.data.clinicId } as ClinicProfileInput;
+      const profile = parseClinicProfile(profileInput);
+      const savedProfile = await options.service.saveClinicProfile(profile);
+      return reply.send({ profile: savedProfile });
+    } catch (error) {
+      if (error instanceof z.ZodError || error instanceof DomainError) {
+        return reply.status(400).send({ error: "invalid_clinic_profile" });
       }
       throw error;
     }

@@ -119,6 +119,17 @@ describe("OnboardingService", () => {
     await expect(context.service.isClinicActive("clinic_1")).resolves.toBe(true);
   });
 
+  it("saves and returns clinic profiles", async () => {
+    const context = buildContext();
+
+    await expect(context.service.saveClinicProfile(profile("clinic_1"))).resolves.toEqual(
+      expect.objectContaining({ clinicId: "clinic_1", name: "Clinica Demo" })
+    );
+    expect(await context.operational.getClinicProfile("clinic_1")).toEqual(
+      expect.objectContaining({ clinicId: "clinic_1", services: [expect.objectContaining({ id: "svc_botox" })] })
+    );
+  });
+
   it("pauses active clinics and reports inactive status", async () => {
     const context = buildContext();
     await context.service.createManualClinic({

@@ -16,6 +16,36 @@ const readinessLabels: Array<{ key: keyof Pick<
   { key: "activationChecklistCompleted", label: "Activation checklist completed" }
 ];
 
+const initialClinicProfileJson = JSON.stringify(
+  {
+    name: "Clinica Demo",
+    timezone: "America/Argentina/Buenos_Aires",
+    services: [
+      {
+        id: "svc_botox",
+        name: "Botox",
+        durationMinutes: 30,
+        priceText: "Desde $120.000",
+        preparation: "Evitar alcohol 24 horas antes.",
+        restrictions: [],
+        professionalIds: ["pro_perez"]
+      }
+    ],
+    professionals: [
+      {
+        id: "pro_perez",
+        name: "Dra. Perez",
+        calendarId: "cal_perez",
+        workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
+      }
+    ],
+    appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 1440, bufferMinutes: 0 },
+    requiredPatientFields: ["fullName"]
+  },
+  null,
+  2
+);
+
 export default function ClinicSetupPage() {
   const params = useParams<{ clinicId: string }>();
   const clinicId = params.clinicId;
@@ -26,6 +56,7 @@ export default function ClinicSetupPage() {
   const [localKnowledge, setLocalKnowledge] = useState(
     "Payment methods:\nInsurance:\nAddress and parking:\nCancellation policy:"
   );
+  const [profileJson, setProfileJson] = useState(initialClinicProfileJson);
 
   async function loadClinic() {
     setIsBusy(true);
@@ -77,6 +108,35 @@ export default function ClinicSetupPage() {
       setStatus("Readiness updated.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to update readiness.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function saveProfile() {
+    let payload: unknown;
+    try {
+      payload = JSON.parse(profileJson);
+    } catch {
+      setStatus("Clinic profile JSON is invalid.");
+      return;
+    }
+
+    setIsBusy(true);
+    setStatus("Saving clinic profile...");
+
+    try {
+      const response = await apiJson<{ profile: { clinicId: string; name: string } }>(
+        `/internal/onboarding/clinics/${clinicId}/profile`,
+        {
+          method: "PUT",
+          headers: adminHeaders(token),
+          body: JSON.stringify(payload)
+        }
+      );
+      setStatus(`Clinic profile saved for ${response.profile.name}.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to save clinic profile.");
     } finally {
       setIsBusy(false);
     }
@@ -196,6 +256,24 @@ export default function ClinicSetupPage() {
 
         <div className="internal-panel internal-form">
           <div className="internal-panel-heading">
+            <h2>Clinic profile JSON</h2>
+          </div>
+          <label>
+            Profile
+            <textarea
+              spellCheck={false}
+              value={profileJson}
+              onChange={(event) => setProfileJson(event.target.value)}
+              rows={18}
+            />
+          </label>
+          <button className="primary-link" disabled={isBusy || !token} onClick={saveProfile} type="button">
+            {isBusy ? "Working..." : "Save clinic profile"}
+          </button>
+        </div>
+
+        <div className="internal-panel internal-form">
+          <div className="internal-panel-heading">
             <h2>Knowledge / FAQ placeholder</h2>
           </div>
           <label>
@@ -207,8 +285,7 @@ export default function ClinicSetupPage() {
             />
           </label>
           <p className="internal-empty">
-            Profile and knowledge persistence are not available in the backend yet. These notes are local only and are
-            not saved.
+            Knowledge persistence is not available in the backend yet. These notes are local only and are not saved.
           </p>
         </div>
       </section>

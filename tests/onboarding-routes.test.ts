@@ -166,6 +166,49 @@ describe("onboarding routes", () => {
     await app.close();
   });
 
+  it("saves a real clinic profile through internal onboarding", async () => {
+    const context = buildContext();
+    const app = buildApp({ onboarding: { service: context.service, adminToken: "secret" } });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/internal/onboarding/clinics/clinic_1/profile",
+      headers: { authorization: "Bearer secret" },
+      payload: {
+        name: "Clinica Demo",
+        timezone: "America/Argentina/Buenos_Aires",
+        services: [
+          {
+            id: "svc_botox",
+            name: "Botox",
+            durationMinutes: 30,
+            priceText: "Desde $120.000",
+            preparation: "Evitar alcohol 24 horas antes.",
+            restrictions: [],
+            professionalIds: ["pro_perez"]
+          }
+        ],
+        professionals: [
+          {
+            id: "pro_perez",
+            name: "Dra. Perez",
+            calendarId: "cal_perez",
+            workingHours: [{ day: 1, startTime: "09:00", endTime: "17:00" }]
+          }
+        ],
+        appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 1440, bufferMinutes: 0 },
+        requiredPatientFields: ["fullName"]
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ profile: expect.objectContaining({ clinicId: "clinic_1", name: "Clinica Demo" }) });
+    expect(await context.operational.getClinicProfile("clinic_1")).toEqual(
+      expect.objectContaining({ clinicId: "clinic_1", services: [expect.objectContaining({ id: "svc_botox" })] })
+    );
+    await app.close();
+  });
+
   it("does not register onboarding routes when options are omitted", async () => {
     const app = buildApp();
 

@@ -124,8 +124,9 @@ export class OnboardingService {
     return this.options.onboarding.getClinicSetup(clinicId);
   }
 
-  async saveClinicProfile(profile: ClinicProfile): Promise<void> {
+  async saveClinicProfile(profile: ClinicProfile): Promise<ClinicProfile> {
     await this.options.operational.upsertClinicProfile(profile);
+    return profile;
   }
 
   async updatePaymentStatus(input: UpdatePaymentStatusInput): Promise<ClinicSetupRecord> {
