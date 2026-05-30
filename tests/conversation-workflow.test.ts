@@ -197,7 +197,7 @@ describe("ConversationWorkflow", () => {
         clinicId: "clinic_1",
         conversationId: "conv_1",
         type: "intent.detected",
-        metadata: { intent: "book" }
+        metadata: expect.objectContaining({ intent: "book", provider: "rules" })
       })
     );
   });
@@ -227,7 +227,7 @@ describe("ConversationWorkflow", () => {
       expect.objectContaining({
         conversationId: "conv_1",
         type: "intent.detected",
-        metadata: { intent: "handoff" }
+        metadata: expect.objectContaining({ intent: "handoff", provider: "rules" })
       })
     );
   });

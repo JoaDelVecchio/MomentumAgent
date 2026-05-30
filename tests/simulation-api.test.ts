@@ -133,7 +133,7 @@ describe("local simulation API", () => {
         clinicId: "clinic_1",
         conversationId: "conv_audit",
         type: "intent.detected",
-        metadata: { intent: "book" }
+        metadata: expect.objectContaining({ intent: "book", provider: "rules" })
       })
     ]);
   });

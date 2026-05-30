@@ -3,7 +3,9 @@ import type { AuditLogPort } from "../../ports/audit-log.js";
 import { CalendarInfrastructureError } from "../../ports/calendar.js";
 import type { Conversation, OperationalRepository, PendingBooking } from "../../ports/repositories.js";
 import type { SchedulingService } from "../scheduling/scheduling-service.js";
-import { interpretIntent, normalizeText } from "./intent.js";
+import type { ConversationInterpreter } from "./interpreter.js";
+import { normalizeText } from "./intent.js";
+import { RulesConversationInterpreter } from "./rules-interpreter.js";
 
 type InboundMessage = {
   clinicId: string;
@@ -22,7 +24,8 @@ export class ConversationWorkflow {
     private readonly repos: OperationalRepository,
     private readonly scheduling: SchedulingService,
     private readonly audit: AuditLogPort,
-    private readonly now: () => Date = () => new Date()
+    private readonly now: () => Date = () => new Date(),
+    private readonly interpreter: ConversationInterpreter = new RulesConversationInterpreter()
   ) {}
 
   async handleInboundMessage(input: InboundMessage): Promise<WorkflowResult> {
@@ -43,16 +46,32 @@ export class ConversationWorkflow {
       return pendingDataResult;
     }
 
-    const intent = interpretIntent(input.text);
+    const intent = await this.interpreter.interpret({
+      clinicId: input.clinicId,
+      conversationId: input.conversationId,
+      patientId: input.patientId,
+      messageText: input.text,
+      now: this.now(),
+      clinicProfile: await this.repos.getClinicProfile(input.clinicId),
+      pendingBooking: conversation.pendingBooking
+    });
     await this.audit.record({
       clinicId: input.clinicId,
       conversationId: input.conversationId,
       type: "intent.detected",
-      message: `Detected ${intent.type}`,
-      metadata: { intent: intent.type }
+      message: `Detected ${intent.intent}`,
+      metadata: {
+        intent: intent.intent,
+        provider: intent.provider,
+        confidence: String(intent.confidence),
+        serviceName: intent.serviceName ?? "",
+        requestedTopics: intent.requestedTopics.join(","),
+        requiresHuman: String(intent.requiresHuman),
+        safetyReason: intent.safetyReason ?? ""
+      }
     });
 
-    if (intent.type === "handoff") {
+    if (intent.intent === "handoff") {
       const conversation = await this.repos.getConversation({
         clinicId: input.clinicId,
         conversationId: input.conversationId
@@ -63,20 +82,20 @@ export class ConversationWorkflow {
       return { kind: "handoff", text: "Te derivo con recepcion para que puedan ayudarte por este mismo chat." };
     }
 
-    if (intent.type === "book") {
-      return await this.handleBookingIntent(input, intent.serviceName);
+    if (intent.intent === "book") {
+      return await this.handleBookingIntent(input, intent.serviceName ?? "");
     }
 
-    if (intent.type === "confirm") {
+    if (intent.intent === "confirm") {
       return await this.handleConfirmation(input, conversation);
     }
 
-    if (intent.type === "cancel") {
+    if (intent.intent === "cancel") {
       await this.clearPendingBooking(input.clinicId, input.conversationId);
       return await this.handleCancelIntent(input);
     }
 
-    if (intent.type === "reschedule") {
+    if (intent.intent === "reschedule") {
       await this.clearPendingBooking(input.clinicId, input.conversationId);
       return await this.handleRescheduleIntent(input);
     }
