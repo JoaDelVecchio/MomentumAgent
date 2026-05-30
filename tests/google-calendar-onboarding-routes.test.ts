@@ -215,6 +215,28 @@ describe("Google calendar onboarding routes", () => {
     expect(response.json()).toEqual({ error: "google_calendar_reconnect_required" });
     await app.close();
   });
+
+  it("maps non-bookable Google calendar to 409 for calendars", async () => {
+    const service = new FakeGoogleCalendarOnboardingService({
+      listCalendarsError: new GoogleCalendarOnboardingError("google_calendar_calendar_not_bookable")
+    });
+    const app = buildApp({
+      googleCalendarOnboarding: {
+        adminToken: "secret",
+        service
+      }
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/internal/onboarding/clinics/clinic_google/google-calendar/calendars",
+      headers: { authorization: "Bearer secret" }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: "google_calendar_calendar_not_bookable" });
+    await app.close();
+  });
 });
 
 type FakeGoogleCalendarOnboardingServiceOptions = {
