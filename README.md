@@ -31,6 +31,7 @@ The repository contains the first local backend slice for the Momentum MVP:
 - fake calendar source-of-truth plus Google Calendar OAuth/provider wiring;
 - scheduling workflows for booking, rescheduling, and cancellation;
 - WhatsApp-style conversation workflow;
+- Kapso WhatsApp webhook/provider integration behind a messaging port;
 - outbound policies for reminders, reactivation, and freed-slot matching;
 - local simulation API;
 - Prisma SQLite schema for MVP persistence.
@@ -121,3 +122,35 @@ Required calendar scopes:
 
 - `https://www.googleapis.com/auth/calendar.events`
 - `https://www.googleapis.com/auth/calendar.events.freebusy`
+
+## Kapso WhatsApp Local Setup
+
+Set these env vars to mount the real WhatsApp webhook:
+
+```bash
+WHATSAPP_PROVIDER=kapso
+KAPSO_API_KEY="..."
+KAPSO_WEBHOOK_SECRET="..."
+KAPSO_PHONE_NUMBER_ID="..."
+KAPSO_BUSINESS_ACCOUNT_ID="..."
+MOMENTUM_PUBLIC_WEBHOOK_URL="https://your-tunnel.example.com"
+```
+
+Local smoke test:
+
+1. Start the API:
+
+```bash
+npm run dev
+```
+
+2. Expose the local API with a tunnel and set `MOMENTUM_PUBLIC_WEBHOOK_URL` to that public URL.
+3. In Kapso, register a webhook for `whatsapp.message.received` pointing to:
+
+```text
+https://your-tunnel.example.com/webhooks/whatsapp/kapso
+```
+
+4. Send a WhatsApp text to the connected number.
+5. Verify Momentum replies through Kapso.
+6. Re-send the same webhook delivery with the same `X-Idempotency-Key` and verify it does not create a duplicate reply.
