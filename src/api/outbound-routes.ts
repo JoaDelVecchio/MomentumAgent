@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type {
@@ -24,7 +25,7 @@ export function registerOutboundAutomationRoutes(
   options: OutboundAutomationRoutesOptions
 ) {
   app.post("/internal/outbound/run", async (request, reply) => {
-    if (request.headers.authorization !== `Bearer ${options.token}`) {
+    if (!matchesBearerToken(request.headers.authorization, options.token)) {
       return reply.status(401).send({ error: "unauthorized" });
     }
 
@@ -46,4 +47,27 @@ export function registerOutboundAutomationRoutes(
 
     return reply.send({ reminders, reactivations });
   });
+}
+
+function readBearerToken(authorization: string | string[] | undefined) {
+  if (!authorization || Array.isArray(authorization)) {
+    return undefined;
+  }
+
+  const match = /^Bearer\s+(.+)$/iu.exec(authorization);
+  return match?.[1];
+}
+
+function matchesBearerToken(authorization: string | string[] | undefined, expected: string) {
+  const actual = readBearerToken(authorization);
+  if (!actual) {
+    return false;
+  }
+
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  return (
+    actualBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(actualBuffer, expectedBuffer)
+  );
 }

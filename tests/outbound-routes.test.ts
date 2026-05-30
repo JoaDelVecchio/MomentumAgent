@@ -23,6 +23,31 @@ describe("outbound automation internal routes", () => {
     await app.close();
   });
 
+  it.each([
+    "Bearer wrong",
+    "Bearer ",
+    "Basic secret",
+    "secret",
+    ["Bearer secret", "Bearer wrong"]
+  ])("rejects run requests with malformed or incorrect authorization %j", async (authorization) => {
+    const app = buildApp({
+      outboundAutomation: { token: "secret", service: new FakeOutboundAutomationService() }
+    });
+    const headers = { authorization: authorization as unknown as string };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/outbound/run",
+      headers,
+      payload: { clinicId: "clinic_1", now: "2026-06-02T12:00:00.000Z" }
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ error: "unauthorized" });
+
+    await app.close();
+  });
+
   it("runs due reminders and reactivations with the configured bearer token", async () => {
     const service = new FakeOutboundAutomationService();
     const app = buildApp({
@@ -45,6 +70,28 @@ describe("outbound automation internal routes", () => {
       "reminders:clinic_1:2026-06-02T12:00:00.000Z",
       "reactivations:clinic_1:2026-06-02T12:00:00.000Z"
     ]);
+
+    await app.close();
+  });
+
+  it("accepts a case-insensitive bearer authorization scheme", async () => {
+    const service = new FakeOutboundAutomationService();
+    const app = buildApp({
+      outboundAutomation: { token: "secret", service }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/outbound/run",
+      headers: { authorization: "bearer secret" },
+      payload: { clinicId: "clinic_1", now: "2026-06-02T12:00:00.000Z" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      reminders: { sent: 1, blocked: 0, failed: 0, skipped: 0 },
+      reactivations: { sent: 2, blocked: 0, failed: 0, skipped: 0 }
+    });
 
     await app.close();
   });
