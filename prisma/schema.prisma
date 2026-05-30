@@ -15,6 +15,18 @@ model Clinic {
   cancellationNoticeMinutes Int
   bufferMinutes             Int
   requiredPatientFieldsJson String
+  leadId                    String?
+  source                    String                @default("presencial")
+  lifecycleState            String                @default("setup")
+  paymentStatus             String                @default("unpaid")
+  primaryContactName        String                @default("")
+  primaryContactPhone       String                @default("")
+  city                      String                @default("")
+  country                   String                @default("Argentina")
+  whatsappReady             Boolean               @default(false)
+  calendarConnected         Boolean               @default(false)
+  testConversationPassed    Boolean               @default(false)
+  activationChecklistCompleted Boolean             @default(false)
   createdAt                 DateTime              @default(now())
   updatedAt                 DateTime              @updatedAt
   services                  Service[]
@@ -28,6 +40,50 @@ model Clinic {
   calendarConnections       CalendarConnection[]
   processedWebhookDeliveries ProcessedWebhookDelivery[]
   outboundDeliveries        OutboundDelivery[]
+  knowledgeRecords          ClinicKnowledge[]
+  convertedLeads            ClinicLead[]
+
+  @@index([lifecycleState, paymentStatus, updatedAt])
+  @@index([source, updatedAt])
+  @@index([leadId])
+}
+
+model ClinicLead {
+  id                       String   @id
+  contactName              String
+  clinicName               String
+  whatsappOrPhone          String
+  city                     String
+  country                  String
+  professionalCount        Int
+  currentSchedulingSystem  String
+  monthlyWhatsappInquiries String
+  mainPain                 String
+  source                   String
+  status                   String
+  convertedClinicId        String?
+  submittedAt              DateTime
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  convertedClinic          Clinic?  @relation(fields: [convertedClinicId], references: [id], onDelete: SetNull)
+
+  @@index([submittedAt])
+  @@index([status, submittedAt])
+  @@index([source, submittedAt])
+  @@index([convertedClinicId])
+}
+
+model ClinicKnowledge {
+  id        String   @id
+  clinicId  String
+  category  String
+  question  String
+  answer    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  clinic    Clinic   @relation(fields: [clinicId], references: [id])
+
+  @@index([clinicId, category, question])
 }
 
 model Service {
