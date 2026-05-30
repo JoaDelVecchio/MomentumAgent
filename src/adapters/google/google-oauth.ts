@@ -23,6 +23,16 @@ export type GoogleOAuthTokens = {
   scope?: string | null;
 };
 
+export type GoogleOAuthStatePayload = {
+  clinicId: string;
+  nonce: string;
+  returnPath?: string;
+};
+
+export type GoogleAuthorizationUrlOptions = {
+  returnPath?: string;
+};
+
 export type GoogleOAuthClient = {
   generateAuthUrl(input: GoogleAuthorizationUrlInput): string;
   getToken(input: { code: string }): Promise<{ tokens: GoogleOAuthTokens }>;
@@ -59,18 +69,22 @@ export class GoogleOAuthService {
     this.client = clientFactory(config);
   }
 
-  createAuthorizationUrl(clinicId: string) {
+  createAuthorizationUrl(clinicId: string, options: GoogleAuthorizationUrlOptions = {}) {
+    const returnPath = options.returnPath
+      ? assertAllowedReturnPath(options.returnPath, clinicId)
+      : undefined;
     return this.client.generateAuthUrl({
       access_type: "offline",
       prompt: "consent",
       scope: this.config.scopes,
-      state: encodeGoogleOAuthState(clinicId, this.config.stateSecret),
+      state: encodeGoogleOAuthState({ clinicId, returnPath }, this.config.stateSecret),
       include_granted_scopes: true
     });
   }
 
   async handleCallback(code: string, state: string) {
-    const clinicId = decodeGoogleOAuthState(state, this.config.stateSecret);
+    const statePayload = decodeGoogleOAuthState(state, this.config.stateSecret);
+    const clinicId = statePayload.clinicId;
     const { tokens } = await this.client.getToken({ code });
     const refreshToken = tokens.refresh_token ?? undefined;
     const existingCredentials = refreshToken
@@ -92,7 +106,7 @@ export class GoogleOAuthService {
       expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined
     });
 
-    return { clinicId };
+    return { clinicId, returnPath: statePayload.returnPath };
   }
 }
 
@@ -112,9 +126,12 @@ function createGoogleOAuthClient(config: GoogleCalendarConfig): GoogleOAuthClien
   };
 }
 
-function encodeGoogleOAuthState(clinicId: string, stateSecret: string) {
+function encodeGoogleOAuthState(
+  input: Omit<GoogleOAuthStatePayload, "nonce">,
+  stateSecret: string
+) {
   const nonce = randomBytes(16).toString("base64url");
-  const payload = Buffer.from(JSON.stringify({ clinicId, nonce }), "utf8").toString(
+  const payload = Buffer.from(JSON.stringify({ ...input, nonce }), "utf8").toString(
     "base64url"
   );
   const signature = signOAuthState(payload, stateSecret);
@@ -133,7 +150,17 @@ function decodeGoogleOAuthState(state: string, stateSecret: string) {
     throw new GoogleOAuthInvalidStateError();
   }
 
-  return parseStatePayload(payload).clinicId;
+  return parseStatePayload(payload);
+}
+
+function assertAllowedReturnPath(returnPath: string, clinicId: string) {
+  if (
+    returnPath.startsWith(`/internal/onboarding/clinics/${encodeURIComponent(clinicId)}`) ||
+    returnPath.startsWith(`/internal/onboarding/clinics/${clinicId}`)
+  ) {
+    return returnPath;
+  }
+  throw new Error("Invalid Google OAuth return path");
 }
 
 function signOAuthState(payload: string, stateSecret: string) {
@@ -175,7 +202,7 @@ function parseStatePayload(payload: string) {
   }
 }
 
-function isStatePayload(value: unknown): value is { clinicId: string; nonce: string } {
+function isStatePayload(value: unknown): value is GoogleOAuthStatePayload {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -184,6 +211,7 @@ function isStatePayload(value: unknown): value is { clinicId: string; nonce: str
     typeof value.clinicId === "string" &&
     value.clinicId.length > 0 &&
     typeof value.nonce === "string" &&
-    value.nonce.length > 0
+    value.nonce.length > 0 &&
+    (!("returnPath" in value) || typeof value.returnPath === "string")
   );
 }

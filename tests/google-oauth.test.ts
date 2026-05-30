@@ -288,6 +288,54 @@ describe("Google Calendar OAuth routes", () => {
     expect(credentials?.providerAccountEmail).toBeUndefined();
   });
 
+  it("redirects OAuth callback to a signed internal return path when provided", async () => {
+    const oauthClient = new FakeGoogleOAuthClient(config, {
+      access_token: "google_access_token_return_path",
+      refresh_token: "google_refresh_token_return_path",
+      expiry_date: Date.parse("2026-06-01T12:00:00.000Z"),
+      scope: GOOGLE_CALENDAR_SCOPES.join(" ")
+    });
+    const repository = new InMemoryCalendarCredentialRepository();
+    const service = new GoogleOAuthService(config, repository, () => oauthClient);
+    const app = buildApp({
+      googleCalendarOAuthService: service,
+      googleCalendarSetupToken: config.setupToken
+    });
+    const clinicId = "clinic_google_oauth_return_path";
+    const returnPath = `/internal/onboarding/clinics/${clinicId}?googleCalendar=connected`;
+    const startUrl = service.createAuthorizationUrl(clinicId, { returnPath });
+    const state = new URL(startUrl).searchParams.get("state");
+
+    const callback = await app.inject({
+      method: "GET",
+      url: `/integrations/google-calendar/callback?code=oauth_code&state=${encodeURIComponent(state ?? "")}`
+    });
+
+    expect(callback.statusCode).toBe(302);
+    expect(callback.headers.location).toBe(returnPath);
+    await expect(repository.get({ clinicId, provider: "google" })).resolves.toMatchObject({
+      clinicId,
+      provider: "google",
+      refreshToken: "google_refresh_token_return_path"
+    });
+    await app.close();
+  });
+
+  it("rejects OAuth return paths that are not internal onboarding paths", () => {
+    const repository = new InMemoryCalendarCredentialRepository();
+    const service = new GoogleOAuthService(
+      config,
+      repository,
+      () => new FakeGoogleOAuthClient(config)
+    );
+
+    expect(() =>
+      service.createAuthorizationUrl("clinic_google_oauth_bad_return", {
+        returnPath: "https://evil.example.com/callback"
+      })
+    ).toThrow("Invalid Google OAuth return path");
+  });
+
   it("rejects callback tokens that do not include all required calendar scopes", async () => {
     const oauthClient = new FakeGoogleOAuthClient(config, {
       access_token: "partial_scope_access_token",

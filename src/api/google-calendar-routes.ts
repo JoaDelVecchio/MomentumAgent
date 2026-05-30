@@ -55,6 +55,9 @@ export function registerGoogleCalendarRoutes(
         parsed.data.code,
         parsed.data.state
       );
+      if (result.returnPath) {
+        return reply.redirect(result.returnPath);
+      }
       return reply.send({ status: "connected", clinicId: result.clinicId });
     } catch (error) {
       if (
