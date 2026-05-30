@@ -11,12 +11,9 @@ import type {
   ClinicSetupResponse
 } from "../../../../../../lib/types";
 
-const readinessItems: Array<{ key: ClinicReadinessKey; label: string; getValue: (setup: ClinicSetupRecord) => boolean }> = [
-  {
-    key: "clinic_profile",
-    label: "Clinic profile saved",
-    getValue: (setup) => setup.lifecycleState === "active"
-  },
+type ChecklistState = boolean | "unknown";
+
+const setupReadinessItems: Array<{ key: ClinicReadinessKey; label: string; getValue: (setup: ClinicSetupRecord) => boolean }> = [
   { key: "payment", label: "Payment eligible", getValue: (setup) => ["paid", "trial", "waived"].includes(setup.paymentStatus) },
   { key: "whatsapp", label: "WhatsApp ready", getValue: (setup) => setup.whatsappReady },
   { key: "calendar", label: "Calendar connected", getValue: (setup) => setup.calendarConnected },
@@ -34,8 +31,11 @@ export default function ClinicActivationPage() {
   const [token, setToken] = useState("");
   const [setup, setSetup] = useState<ClinicSetupRecord | null>(null);
   const [missing, setMissing] = useState<ClinicReadinessKey[]>([]);
+  const [activationAttempted, setActivationAttempted] = useState(false);
+  const [activationSucceeded, setActivationSucceeded] = useState(false);
   const [status, setStatus] = useState("Enter an admin token, then load activation state.");
   const [isBusy, setIsBusy] = useState(false);
+  const profileState = profileChecklistState({ activationAttempted, activationSucceeded, missing });
 
   async function loadClinic() {
     setIsBusy(true);
@@ -47,6 +47,8 @@ export default function ClinicActivationPage() {
       });
       setSetup(response.setup);
       setMissing([]);
+      setActivationAttempted(false);
+      setActivationSucceeded(false);
       setStatus("Activation state loaded.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to load activation state.");
@@ -63,10 +65,14 @@ export default function ClinicActivationPage() {
       const response = await postLifecycle(`/internal/onboarding/clinics/${clinicId}/activate`, token);
       setSetup(response.setup);
       setMissing([]);
+      setActivationAttempted(true);
+      setActivationSucceeded(true);
       setStatus("Clinic activated.");
     } catch (error) {
       if (isActivationError(error)) {
         setMissing(error.missing ?? []);
+        setActivationAttempted(true);
+        setActivationSucceeded(false);
         setStatus(error.error === "clinic_not_ready" ? "Clinic is missing readiness requirements." : error.error);
       } else {
         setStatus(error instanceof Error ? error.message : "Unable to activate clinic.");
@@ -138,9 +144,14 @@ export default function ClinicActivationPage() {
         </div>
         {setup ? (
           <div className="check-stack">
-            {readinessItems.map((item) => (
+            <div className="check-row readonly">
+              <span className={indicatorClass(profileState)} />
+              <span>Clinic profile saved</span>
+              {profileState === "unknown" ? <span className="check-note">Check on activation</span> : null}
+            </div>
+            {setupReadinessItems.map((item) => (
               <div className="check-row readonly" key={item.key}>
-                <span className={item.getValue(setup) ? "check-indicator on" : "check-indicator"} />
+                <span className={indicatorClass(item.getValue(setup))} />
                 <span>{item.label}</span>
               </div>
             ))}
@@ -193,4 +204,28 @@ async function postLifecycle(path: string, token: string): Promise<ClinicSetupRe
 
 function isActivationError(error: unknown): error is ActivationErrorResponse {
   return Boolean(error && typeof error === "object" && "error" in error);
+}
+
+export function profileChecklistState(input: {
+  activationAttempted: boolean;
+  activationSucceeded: boolean;
+  missing: ClinicReadinessKey[];
+}): ChecklistState {
+  if (input.activationSucceeded) {
+    return true;
+  }
+  if (!input.activationAttempted) {
+    return "unknown";
+  }
+  return !input.missing.includes("clinic_profile");
+}
+
+function indicatorClass(state: ChecklistState): string {
+  if (state === true) {
+    return "check-indicator on";
+  }
+  if (state === "unknown") {
+    return "check-indicator unknown";
+  }
+  return "check-indicator";
 }

@@ -727,6 +727,18 @@ p {
   background: var(--mint);
 }
 
+.check-indicator.unknown {
+  border-color: var(--gold);
+  background: transparent;
+}
+
+.check-note {
+  margin-left: auto;
+  color: var(--gold);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
 .button-like {
   cursor: pointer;
 }
