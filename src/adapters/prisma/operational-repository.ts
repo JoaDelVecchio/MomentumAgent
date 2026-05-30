@@ -7,10 +7,12 @@ import type {
   ConversationByPatientLookup,
   ConversationLookup,
   ListScheduledAppointmentsInput,
+  OutboundAutomationType,
   OperationalRepository,
   OutboundDeliveryClaim,
   OutboundDeliveryClaimInput,
   OutboundDeliveryRecord,
+  OutboundDeliveryStatus,
   PatientInterest,
   PendingBooking,
   ProcessedWebhookDeliveryInput,
@@ -54,6 +56,28 @@ type WebhookDeliveryPrismaRecord = {
   status: string;
   responseText: string | null;
   workflowResult: string | null;
+};
+
+type OutboundDeliveryPrismaRecord = {
+  id: string;
+  clinicId: string;
+  deliveryKey: string;
+  automationType: string;
+  status: string;
+  toWhatsappNumber: string;
+  patientId: string | null;
+  conversationId: string | null;
+  appointmentId: string | null;
+  templateName: string;
+  metadataJson: string;
+  providerMessageId: string | null;
+  failureReason: string | null;
+  claimedAt: Date;
+  sentAt: Date | null;
+  blockedAt: Date | null;
+  failedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 type PatientInterestRecord = {
@@ -494,29 +518,100 @@ export class PrismaOperationalRepository implements OperationalRepository {
     }
   }
 
-  // Temporary until Task 2 adds schema-backed outbound delivery persistence.
-  async claimOutboundDelivery(_input: OutboundDeliveryClaimInput): Promise<OutboundDeliveryClaim> {
-    throw new Error("Outbound deliveries are not implemented for PrismaOperationalRepository");
+  async claimOutboundDelivery(input: OutboundDeliveryClaimInput): Promise<OutboundDeliveryClaim> {
+    try {
+      const delivery = await this.prisma.outboundDelivery.create({
+        data: {
+          id: `outbound_${randomUUID()}`,
+          clinicId: input.clinicId,
+          deliveryKey: input.key,
+          automationType: input.automationType,
+          status: "claimed",
+          toWhatsappNumber: input.toWhatsappNumber,
+          patientId: input.patientId,
+          conversationId: input.conversationId,
+          appointmentId: input.appointmentId,
+          templateName: input.templateName,
+          metadataJson: JSON.stringify(input.metadata),
+          claimedAt: input.now,
+          createdAt: input.now,
+          updatedAt: input.now
+        }
+      });
+      return { kind: "new", delivery: toOutboundDelivery(delivery) };
+    } catch (error) {
+      if (!isPrismaUniqueConflict(error)) {
+        throw error;
+      }
+
+      const delivery = await this.prisma.outboundDelivery.findUnique({
+        where: { deliveryKey: input.key }
+      });
+      if (!delivery) {
+        throw error;
+      }
+      return { kind: "existing", delivery: toOutboundDelivery(delivery) };
+    }
   }
 
-  async getOutboundDelivery(_key: string): Promise<OutboundDeliveryRecord | undefined> {
-    throw new Error("Outbound deliveries are not implemented for PrismaOperationalRepository");
+  async getOutboundDelivery(key: string): Promise<OutboundDeliveryRecord | undefined> {
+    const delivery = await this.prisma.outboundDelivery.findUnique({
+      where: { deliveryKey: key }
+    });
+    return delivery ? toOutboundDelivery(delivery) : undefined;
   }
 
-  async markOutboundDeliverySent(_input: {
+  async markOutboundDeliverySent(input: {
     key: string;
     providerMessageId: string;
     sentAt: Date;
   }): Promise<void> {
-    throw new Error("Outbound deliveries are not implemented for PrismaOperationalRepository");
+    await this.updateClaimedOutboundDelivery(input.key, {
+      status: "sent",
+      providerMessageId: input.providerMessageId,
+      sentAt: input.sentAt,
+      updatedAt: input.sentAt
+    });
   }
 
-  async markOutboundDeliveryBlocked(_input: { key: string; reason: string; blockedAt: Date }): Promise<void> {
-    throw new Error("Outbound deliveries are not implemented for PrismaOperationalRepository");
+  async markOutboundDeliveryBlocked(input: { key: string; reason: string; blockedAt: Date }): Promise<void> {
+    await this.updateClaimedOutboundDelivery(input.key, {
+      status: "blocked",
+      failureReason: input.reason,
+      blockedAt: input.blockedAt,
+      updatedAt: input.blockedAt
+    });
   }
 
-  async markOutboundDeliveryFailed(_input: { key: string; reason: string; failedAt: Date }): Promise<void> {
-    throw new Error("Outbound deliveries are not implemented for PrismaOperationalRepository");
+  async markOutboundDeliveryFailed(input: { key: string; reason: string; failedAt: Date }): Promise<void> {
+    await this.updateClaimedOutboundDelivery(input.key, {
+      status: "failed",
+      failureReason: input.reason,
+      failedAt: input.failedAt,
+      updatedAt: input.failedAt
+    });
+  }
+
+  private async updateClaimedOutboundDelivery(
+    key: string,
+    data: Prisma.OutboundDeliveryUpdateManyMutationInput
+  ): Promise<void> {
+    const update = await this.prisma.outboundDelivery.updateMany({
+      where: { deliveryKey: key, status: "claimed" },
+      data
+    });
+    if (update.count === 1) {
+      return;
+    }
+
+    const delivery = await this.prisma.outboundDelivery.findUnique({
+      where: { deliveryKey: key },
+      select: { status: true }
+    });
+    if (!delivery) {
+      throw new Error(`Outbound delivery ${key} was not found`);
+    }
+    throw new Error(`Outbound delivery ${key} is already ${toOutboundDeliveryStatus(delivery.status)}`);
   }
 }
 
@@ -688,6 +783,30 @@ function toWebhookDelivery(record: WebhookDeliveryPrismaRecord): WebhookDelivery
   };
 }
 
+function toOutboundDelivery(record: OutboundDeliveryPrismaRecord): OutboundDeliveryRecord {
+  return {
+    id: record.id,
+    key: record.deliveryKey,
+    clinicId: record.clinicId,
+    automationType: toOutboundAutomationType(record.automationType),
+    status: toOutboundDeliveryStatus(record.status),
+    toWhatsappNumber: record.toWhatsappNumber,
+    ...(record.patientId ? { patientId: record.patientId } : {}),
+    ...(record.conversationId ? { conversationId: record.conversationId } : {}),
+    ...(record.appointmentId ? { appointmentId: record.appointmentId } : {}),
+    templateName: record.templateName,
+    metadata: parseOutboundMetadata(record.metadataJson),
+    ...(record.providerMessageId ? { providerMessageId: record.providerMessageId } : {}),
+    ...(record.failureReason ? { failureReason: record.failureReason } : {}),
+    claimedAt: record.claimedAt,
+    ...(record.sentAt ? { sentAt: record.sentAt } : {}),
+    ...(record.blockedAt ? { blockedAt: record.blockedAt } : {}),
+    ...(record.failedAt ? { failedAt: record.failedAt } : {}),
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt
+  };
+}
+
 function toAppointmentStatus(status: string): Appointment["status"] {
   if (status === "scheduled" || status === "cancelled") return status;
   throw new Error(`Unknown appointment status: ${status}`);
@@ -706,6 +825,31 @@ function toWebhookDeliveryStatus(status: string): WebhookDeliveryRecord["status"
 function toWebhookDeliveryWorkflowResult(workflowResult: string): NonNullable<WebhookDeliveryRecord["workflowResult"]> {
   if (workflowResult === "reply" || workflowResult === "handoff") return workflowResult;
   throw new Error(`Unknown webhook delivery workflow result: ${workflowResult}`);
+}
+
+function toOutboundAutomationType(value: string): OutboundAutomationType {
+  if (value === "reminder" || value === "reactivation" || value === "freed_slot") return value;
+  throw new Error(`Unknown outbound automation type: ${value}`);
+}
+
+function toOutboundDeliveryStatus(value: string): OutboundDeliveryStatus {
+  if (value === "claimed" || value === "sent" || value === "failed" || value === "blocked") return value;
+  throw new Error(`Unknown outbound delivery status: ${value}`);
+}
+
+function parseOutboundMetadata(metadataJson: string): Record<string, string> {
+  const metadata = JSON.parse(metadataJson) as unknown;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    throw new Error("Outbound delivery metadata must be an object");
+  }
+
+  for (const [key, value] of Object.entries(metadata)) {
+    if (typeof value !== "string") {
+      throw new Error(`Outbound delivery metadata value for ${key} must be a string`);
+    }
+  }
+
+  return { ...(metadata as Record<string, string>) };
 }
 
 function isPrismaUniqueConflict(error: unknown): boolean {

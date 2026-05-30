@@ -3,6 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaAuditLog } from "../src/adapters/prisma/audit-log.js";
 import { PrismaOperationalRepository } from "../src/adapters/prisma/operational-repository.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
+import type { Appointment } from "../src/domain/types.js";
+import type { Conversation } from "../src/ports/repositories.js";
 import { createPrismaTestContext, type PrismaTestContext } from "./helpers/prisma.js";
 
 describe("Prisma operational persistence schema", () => {
@@ -460,6 +462,149 @@ describe("PrismaOperationalRepository core state", () => {
   });
 });
 
+describe("PrismaOperationalRepository outbound persistence", () => {
+  let context: PrismaTestContext;
+  let prisma: PrismaClient;
+  let repos: PrismaOperationalRepository;
+
+  beforeAll(async () => {
+    context = createPrismaTestContext("momentum-prisma-outbound-");
+    prisma = context.prisma;
+    repos = new PrismaOperationalRepository(prisma);
+    await repos.upsertClinicProfile(demoProfile());
+  });
+
+  afterAll(async () => {
+    await context.cleanup();
+  });
+
+  it("creates a durable outbound delivery and returns existing for the same key", async () => {
+    await repos.upsertPatient({ id: "pat_outbound", whatsappNumber: "+5491111114444" });
+    await repos.saveConversation(outboundConversation());
+    await repos.saveAppointment(outboundAppointment());
+
+    const now = new Date("2026-05-30T12:00:00.000Z");
+    const first = await repos.claimOutboundDelivery({
+      key: "reminder:appt_outbound:24h",
+      clinicId: "clinic_1",
+      automationType: "reminder",
+      toWhatsappNumber: "+5491111114444",
+      patientId: "pat_outbound",
+      conversationId: "conv_outbound",
+      appointmentId: "appt_outbound",
+      templateName: "appointment_reminder_24h",
+      metadata: { timezone: "America/Argentina/Buenos_Aires", leadTime: "24h" },
+      now
+    });
+    const freshRepos = new PrismaOperationalRepository(prisma);
+    const duplicate = await freshRepos.claimOutboundDelivery({
+      key: "reminder:appt_outbound:24h",
+      clinicId: "clinic_1",
+      automationType: "reminder",
+      toWhatsappNumber: "+5491111114444",
+      patientId: "pat_outbound",
+      conversationId: "conv_outbound",
+      appointmentId: "appt_outbound",
+      templateName: "appointment_reminder_24h",
+      metadata: { timezone: "mutated" },
+      now: new Date("2026-05-30T13:00:00.000Z")
+    });
+
+    expect(first.kind).toBe("new");
+    expect(first.delivery).toEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^outbound_[0-9a-f-]{36}$/u),
+        key: "reminder:appt_outbound:24h",
+        clinicId: "clinic_1",
+        automationType: "reminder",
+        status: "claimed",
+        toWhatsappNumber: "+5491111114444",
+        patientId: "pat_outbound",
+        conversationId: "conv_outbound",
+        appointmentId: "appt_outbound",
+        templateName: "appointment_reminder_24h",
+        metadata: { timezone: "America/Argentina/Buenos_Aires", leadTime: "24h" },
+        claimedAt: now,
+        createdAt: expect.any(Date),
+        updatedAt: expect.any(Date)
+      })
+    );
+    expect(duplicate).toEqual({ kind: "existing", delivery: first.delivery });
+  });
+
+  it("persists sent status, provider message id, sent timestamp, and metadata", async () => {
+    const key = "reminder:appt_outbound:sent";
+    const sentAt = new Date("2026-05-30T12:05:00.000Z");
+
+    await claimPrismaOutboundDelivery(repos, { key });
+    await repos.markOutboundDeliverySent({ key, providerMessageId: "wamid.outbound.1", sentAt });
+
+    const freshRepos = new PrismaOperationalRepository(prisma);
+    expect(await freshRepos.getOutboundDelivery(key)).toEqual(
+      expect.objectContaining({
+        key,
+        status: "sent",
+        providerMessageId: "wamid.outbound.1",
+        sentAt,
+        metadata: { timezone: "America/Argentina/Buenos_Aires", leadTime: "24h" },
+        updatedAt: sentAt
+      })
+    );
+  });
+
+  it("lists scheduled appointments for the clinic and time window", async () => {
+    await repos.upsertPatient({ id: "pat_outbound_window", whatsappNumber: "+5491111114445" });
+    await repos.saveAppointment(
+      outboundAppointment({
+        id: "appt_outbound",
+        patientId: "pat_outbound_window",
+        calendarEventId: "google_evt_outbound",
+        startsAt: new Date("2026-06-01T13:00:00.000Z")
+      })
+    );
+    await repos.saveAppointment(
+      outboundAppointment({
+        id: "appt_outbound_later",
+        patientId: "pat_outbound_window",
+        calendarEventId: "google_evt_outbound_later",
+        startsAt: new Date("2026-06-01T14:00:00.000Z")
+      })
+    );
+    await repos.saveAppointment(
+      outboundAppointment({
+        id: "appt_outbound_cancelled",
+        patientId: "pat_outbound_window",
+        calendarEventId: "google_evt_outbound_cancelled",
+        status: "cancelled",
+        startsAt: new Date("2026-06-01T13:30:00.000Z")
+      })
+    );
+
+    expect(
+      await repos.listScheduledAppointments({
+        clinicId: "clinic_1",
+        from: new Date("2026-06-01T13:00:00.000Z"),
+        to: new Date("2026-06-01T14:00:00.000Z")
+      })
+    ).toEqual([
+      expect.objectContaining({ id: "appt_outbound", startsAt: new Date("2026-06-01T13:00:00.000Z") }),
+      expect.objectContaining({ id: "appt_outbound_later", startsAt: new Date("2026-06-01T14:00:00.000Z") })
+    ]);
+  });
+
+  it("lists conversations by clinic and by patient", async () => {
+    await repos.upsertPatient({ id: "pat_outbound", whatsappNumber: "+5491111114444" });
+    await repos.saveConversation(outboundConversation());
+
+    expect(await repos.listConversationsByClinic("clinic_1")).toContainEqual(
+      expect.objectContaining({ id: "conv_outbound", clinicId: "clinic_1", patientId: "pat_outbound" })
+    );
+    expect(await repos.listConversationsByPatient({ clinicId: "clinic_1", patientId: "pat_outbound" })).toEqual([
+      expect.objectContaining({ id: "conv_outbound", clinicId: "clinic_1", patientId: "pat_outbound" })
+    ]);
+  });
+});
+
 function demoProfile() {
   return parseClinicProfile({
     clinicId: "clinic_1",
@@ -486,6 +631,50 @@ function demoProfile() {
     ],
     appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 1440, bufferMinutes: 0 },
     requiredPatientFields: ["fullName"]
+  });
+}
+
+function outboundConversation(overrides: Partial<Conversation> = {}): Conversation {
+  return {
+    id: "conv_outbound",
+    clinicId: "clinic_1",
+    patientId: "pat_outbound",
+    botPaused: false,
+    createdAt: new Date("2026-05-30T11:00:00.000Z"),
+    updatedAt: new Date("2026-05-30T11:30:00.000Z"),
+    ...overrides
+  };
+}
+
+function outboundAppointment(overrides: Partial<Appointment> = {}): Appointment {
+  const startsAt = overrides.startsAt ?? new Date("2026-06-01T13:00:00.000Z");
+  return {
+    id: "appt_outbound",
+    clinicId: "clinic_1",
+    patientId: "pat_outbound",
+    serviceId: "svc_botox",
+    professionalId: "pro_perez",
+    calendarEventId: "google_evt_outbound",
+    calendarId: "cal_perez",
+    startsAt,
+    endsAt: new Date(startsAt.getTime() + 30 * 60 * 1000),
+    status: "scheduled" as const,
+    ...overrides
+  };
+}
+
+function claimPrismaOutboundDelivery(repos: PrismaOperationalRepository, overrides: { key?: string } = {}) {
+  return repos.claimOutboundDelivery({
+    key: overrides.key ?? "reminder:appt_outbound:24h",
+    clinicId: "clinic_1",
+    automationType: "reminder",
+    toWhatsappNumber: "+5491111114444",
+    patientId: "pat_outbound",
+    conversationId: "conv_outbound",
+    appointmentId: "appt_outbound",
+    templateName: "appointment_reminder_24h",
+    metadata: { timezone: "America/Argentina/Buenos_Aires", leadTime: "24h" },
+    now: new Date("2026-05-30T12:00:00.000Z")
   });
 }
 
