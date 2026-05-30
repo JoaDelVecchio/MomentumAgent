@@ -9,8 +9,19 @@ import {
   Aes256GcmTokenCipher,
   PrismaCalendarCredentialRepository
 } from "../src/adapters/prisma/calendar-auth-repository.js";
+import { buildApp } from "../src/api/app.js";
+import type { GoogleOAuthClient } from "../src/adapters/google/google-oauth.js";
+import {
+  GOOGLE_CALENDAR_SCOPES,
+  GoogleOAuthService
+} from "../src/adapters/google/google-oauth.js";
+import {
+  readGoogleCalendarConfig,
+  type GoogleCalendarConfig
+} from "../src/config/google-calendar.js";
 
-const googleCalendarScope = "https://www.googleapis.com/auth/calendar";
+const googleCalendarScope = "https://www.googleapis.com/auth/calendar.events";
+const googleCalendarFreeBusyScope = "https://www.googleapis.com/auth/calendar.events.freebusy";
 
 describe("InMemoryCalendarCredentialRepository", () => {
   it("saves and reads a Google refresh token by clinicId", async () => {
@@ -162,6 +173,263 @@ describe("Aes256GcmTokenCipher", () => {
     );
   });
 });
+
+describe("Google Calendar OAuth routes", () => {
+  const config: GoogleCalendarConfig = {
+    clientId: "google-client-id",
+    clientSecret: "google-client-secret",
+    redirectUri: "http://localhost:3000/integrations/google-calendar/callback",
+    stateSecret: "google-state-secret",
+    setupToken: "google-setup-token",
+    scopes: [...GOOGLE_CALENDAR_SCOPES]
+  };
+
+  it("reads Google Calendar config from env and rejects invalid redirect URIs", () => {
+    expect(
+      readGoogleCalendarConfig({
+        GOOGLE_CALENDAR_CLIENT_ID: "google-client-id",
+        GOOGLE_CALENDAR_CLIENT_SECRET: "google-client-secret",
+        GOOGLE_CALENDAR_REDIRECT_URI: "http://localhost:3000/integrations/google-calendar/callback",
+        GOOGLE_CALENDAR_OAUTH_STATE_SECRET: "google-state-secret",
+        GOOGLE_CALENDAR_SETUP_TOKEN: "google-setup-token"
+      })
+    ).toEqual(config);
+    expect(() =>
+      readGoogleCalendarConfig({
+        GOOGLE_CALENDAR_CLIENT_ID: "google-client-id",
+        GOOGLE_CALENDAR_CLIENT_SECRET: "google-client-secret",
+        GOOGLE_CALENDAR_REDIRECT_URI: "not a url",
+        GOOGLE_CALENDAR_SETUP_TOKEN: "google-setup-token"
+      })
+    ).toThrow("GOOGLE_CALENDAR_REDIRECT_URI must be a valid URL");
+  });
+
+  it("redirects OAuth start to Google with offline access, consent, state, and approved scopes", async () => {
+    const oauthClient = new FakeGoogleOAuthClient(config);
+    const repository = new InMemoryCalendarCredentialRepository();
+    const service = new GoogleOAuthService(config, repository, () => oauthClient);
+    const app = buildApp({
+      googleCalendarOAuthService: service,
+      googleCalendarSetupToken: config.setupToken
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/integrations/google-calendar/start?clinicId=clinic_google_oauth&setupToken=${config.setupToken}`
+    });
+    const redirectUrl = new URL(String(response.headers.location));
+    const state = redirectUrl.searchParams.get("state");
+
+    expect(response.statusCode).toBe(302);
+    expect(redirectUrl.origin).toBe("https://accounts.google.com");
+    expect(redirectUrl.searchParams.get("client_id")).toBe(config.clientId);
+    expect(redirectUrl.searchParams.get("redirect_uri")).toBe(config.redirectUri);
+    expect(redirectUrl.searchParams.get("access_type")).toBe("offline");
+    expect(redirectUrl.searchParams.get("prompt")).toBe("consent");
+    expect(redirectUrl.searchParams.get("scope")?.split(" ").sort()).toEqual(
+      [googleCalendarScope, googleCalendarFreeBusyScope].sort()
+    );
+    expect(state).toEqual(expect.any(String));
+  });
+
+  it("requires the setup token before starting OAuth for a clinic", async () => {
+    const oauthClient = new FakeGoogleOAuthClient(config);
+    const repository = new InMemoryCalendarCredentialRepository();
+    const service = new GoogleOAuthService(config, repository, () => oauthClient);
+    const app = buildApp({
+      googleCalendarOAuthService: service,
+      googleCalendarSetupToken: config.setupToken
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/integrations/google-calendar/start?clinicId=clinic_google_oauth"
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ error: "unauthorized_google_calendar_oauth_start" });
+  });
+
+  it("exchanges callback code for tokens and stores them for the clinic", async () => {
+    const oauthClient = new FakeGoogleOAuthClient(config, {
+      access_token: "google_access_token_from_callback",
+      refresh_token: "google_refresh_token_from_callback",
+      expiry_date: Date.parse("2026-06-01T12:00:00.000Z"),
+      scope: `${googleCalendarScope} ${googleCalendarFreeBusyScope}`
+    });
+    const repository = new InMemoryCalendarCredentialRepository();
+    const service = new GoogleOAuthService(config, repository, () => oauthClient);
+    const app = buildApp({
+      googleCalendarOAuthService: service,
+      googleCalendarSetupToken: config.setupToken
+    });
+    const clinicId = "clinic.google.oauth.callback";
+    const start = await app.inject({
+      method: "GET",
+      url: `/integrations/google-calendar/start?clinicId=${encodeURIComponent(clinicId)}&setupToken=${config.setupToken}`
+    });
+    const state = new URL(String(start.headers.location)).searchParams.get("state");
+
+    const callback = await app.inject({
+      method: "GET",
+      url: `/integrations/google-calendar/callback?code=oauth_code&state=${encodeURIComponent(state ?? "")}`
+    });
+    const credentials = await repository.get({
+      clinicId,
+      provider: "google"
+    });
+
+    expect(callback.statusCode).toBe(200);
+    expect(callback.json()).toEqual({
+      status: "connected",
+      clinicId
+    });
+    expect(oauthClient.tokenCalls).toEqual([{ code: "oauth_code" }]);
+    expect(credentials).toMatchObject({
+      clinicId,
+      provider: "google",
+      accessToken: "google_access_token_from_callback",
+      refreshToken: "google_refresh_token_from_callback",
+      expiryDate: new Date("2026-06-01T12:00:00.000Z"),
+      scopes: [googleCalendarScope, googleCalendarFreeBusyScope]
+    });
+    expect(credentials?.providerAccountEmail).toBeUndefined();
+  });
+
+  it("rejects callback tokens that do not include all required calendar scopes", async () => {
+    const oauthClient = new FakeGoogleOAuthClient(config, {
+      access_token: "partial_scope_access_token",
+      refresh_token: "partial_scope_refresh_token",
+      expiry_date: Date.parse("2026-06-01T12:00:00.000Z"),
+      scope: googleCalendarScope
+    });
+    const repository = new InMemoryCalendarCredentialRepository();
+    const service = new GoogleOAuthService(config, repository, () => oauthClient);
+    const app = buildApp({
+      googleCalendarOAuthService: service,
+      googleCalendarSetupToken: config.setupToken
+    });
+    const clinicId = "clinic_google_oauth_partial_scope";
+    const start = await app.inject({
+      method: "GET",
+      url: `/integrations/google-calendar/start?clinicId=${clinicId}&setupToken=${config.setupToken}`
+    });
+    const state = new URL(String(start.headers.location)).searchParams.get("state");
+
+    const callback = await app.inject({
+      method: "GET",
+      url: `/integrations/google-calendar/callback?code=partial_scope_code&state=${encodeURIComponent(state ?? "")}`
+    });
+    const credentials = await repository.get({ clinicId, provider: "google" });
+
+    expect(callback.statusCode).toBe(400);
+    expect(callback.json()).toEqual({ error: "invalid_google_calendar_oauth_callback" });
+    expect(credentials).toBeUndefined();
+  });
+
+  it("preserves an existing refresh token when a reconnect callback omits it", async () => {
+    const oauthClient = new FakeGoogleOAuthClient(config, {
+      access_token: "new_google_access_token",
+      expiry_date: Date.parse("2026-06-01T14:00:00.000Z"),
+      scope: `${googleCalendarScope} ${googleCalendarFreeBusyScope}`
+    });
+    const repository = new InMemoryCalendarCredentialRepository();
+    const service = new GoogleOAuthService(config, repository, () => oauthClient);
+    const app = buildApp({
+      googleCalendarOAuthService: service,
+      googleCalendarSetupToken: config.setupToken
+    });
+    const clinicId = "clinic_google_oauth_reconnect";
+    await repository.save({
+      clinicId,
+      provider: "google",
+      scopes: [googleCalendarScope, googleCalendarFreeBusyScope],
+      accessToken: "old_google_access_token",
+      refreshToken: "existing_google_refresh_token",
+      expiryDate: new Date("2026-06-01T12:00:00.000Z")
+    });
+    const start = await app.inject({
+      method: "GET",
+      url: `/integrations/google-calendar/start?clinicId=${encodeURIComponent(clinicId)}&setupToken=${config.setupToken}`
+    });
+    const state = new URL(String(start.headers.location)).searchParams.get("state");
+
+    const callback = await app.inject({
+      method: "GET",
+      url: `/integrations/google-calendar/callback?code=reconnect_code&state=${encodeURIComponent(state ?? "")}`
+    });
+    const credentials = await repository.get({ clinicId, provider: "google" });
+
+    expect(callback.statusCode).toBe(200);
+    expect(credentials?.accessToken).toBe("new_google_access_token");
+    expect(credentials?.refreshToken).toBe("existing_google_refresh_token");
+    expect(credentials?.expiryDate).toEqual(new Date("2026-06-01T14:00:00.000Z"));
+  });
+
+  it("returns 400 for invalid callback state", async () => {
+    const oauthClient = new FakeGoogleOAuthClient(config);
+    const repository = new InMemoryCalendarCredentialRepository();
+    const service = new GoogleOAuthService(config, repository, () => oauthClient);
+    const app = buildApp({
+      googleCalendarOAuthService: service,
+      googleCalendarSetupToken: config.setupToken
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/integrations/google-calendar/callback?code=oauth_code&state=invalid_state"
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "invalid_google_calendar_oauth_callback" });
+    expect(oauthClient.tokenCalls).toEqual([]);
+  });
+});
+
+type FakeGoogleOAuthTokens = {
+  access_token?: string;
+  refresh_token?: string;
+  expiry_date?: number;
+  scope?: string;
+};
+
+class FakeGoogleOAuthClient implements GoogleOAuthClient {
+  readonly tokenCalls: Array<{ code: string }> = [];
+
+  constructor(
+    private readonly config: GoogleCalendarConfig,
+    private readonly tokens: FakeGoogleOAuthTokens = {
+      access_token: "google_access_token",
+      refresh_token: "google_refresh_token",
+      expiry_date: Date.parse("2026-06-01T12:00:00.000Z"),
+      scope: GOOGLE_CALENDAR_SCOPES.join(" ")
+    }
+  ) {}
+
+  generateAuthUrl(input: {
+    access_type: "offline";
+    prompt: "consent";
+    scope: string[];
+    state: string;
+    include_granted_scopes: boolean;
+  }) {
+    const params = new URLSearchParams({
+      client_id: this.config.clientId,
+      redirect_uri: this.config.redirectUri,
+      access_type: input.access_type,
+      prompt: input.prompt,
+      scope: input.scope.join(" "),
+      state: input.state,
+      include_granted_scopes: String(input.include_granted_scopes)
+    });
+    return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  }
+
+  async getToken(input: { code: string }) {
+    this.tokenCalls.push(input);
+    return { tokens: this.tokens };
+  }
+}
 
 function applySqliteMigrations(databasePath: string) {
   const migrationsPath = join(process.cwd(), "prisma", "migrations");

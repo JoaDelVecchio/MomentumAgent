@@ -6,7 +6,7 @@ export type CalendarCredentialLookup = {
 };
 
 export type CalendarCredentialInput = CalendarCredentialLookup & {
-  providerAccountEmail: string;
+  providerAccountEmail?: string;
   scopes: string[];
   accessToken?: string;
   refreshToken?: string;
@@ -15,7 +15,7 @@ export type CalendarCredentialInput = CalendarCredentialLookup & {
 
 export type CalendarCredentials = CalendarCredentialLookup & {
   id: string;
-  providerAccountEmail: string;
+  providerAccountEmail?: string;
   scopes: string[];
   accessToken?: string;
   refreshToken: string;

@@ -19,7 +19,7 @@ type CalendarConnectionRecord = {
   id: string;
   clinicId: string;
   provider: string;
-  providerAccountEmail: string;
+  providerAccountEmail: string | null;
   scopesJson: string;
   encryptedAccessToken: string | null;
   encryptedRefreshToken: string;
@@ -55,6 +55,8 @@ export class PrismaCalendarCredentialRepository implements CalendarCredentialRep
       ? this.cipher.encrypt(input.refreshToken)
       : existing?.encryptedRefreshToken ?? "";
     const expiryDate = input.expiryDate ?? existing?.expiryDate ?? null;
+    const providerAccountEmail =
+      input.providerAccountEmail ?? existing?.providerAccountEmail ?? null;
 
     const connection = existing
       ? await this.prisma.calendarConnection.update({
@@ -65,7 +67,7 @@ export class PrismaCalendarCredentialRepository implements CalendarCredentialRep
             }
           },
           data: {
-            providerAccountEmail: input.providerAccountEmail,
+            providerAccountEmail,
             scopesJson: JSON.stringify(input.scopes),
             encryptedAccessToken,
             encryptedRefreshToken,
@@ -76,7 +78,7 @@ export class PrismaCalendarCredentialRepository implements CalendarCredentialRep
           data: {
             clinicId: input.clinicId,
             provider: input.provider,
-            providerAccountEmail: input.providerAccountEmail,
+            providerAccountEmail,
             scopesJson: JSON.stringify(input.scopes),
             encryptedAccessToken,
             encryptedRefreshToken,
@@ -105,7 +107,7 @@ export class PrismaCalendarCredentialRepository implements CalendarCredentialRep
       id: connection.id,
       clinicId: connection.clinicId,
       provider: parseCalendarProvider(connection.provider),
-      providerAccountEmail: connection.providerAccountEmail,
+      providerAccountEmail: connection.providerAccountEmail ?? undefined,
       scopes: parseScopes(connection.scopesJson),
       accessToken: connection.encryptedAccessToken
         ? this.cipher.decrypt(connection.encryptedAccessToken)

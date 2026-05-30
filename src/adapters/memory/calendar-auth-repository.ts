@@ -20,7 +20,7 @@ export class InMemoryCalendarCredentialRepository implements CalendarCredentialR
     const credentials: CalendarCredentials = {
       clinicId: input.clinicId,
       provider: input.provider,
-      providerAccountEmail: input.providerAccountEmail,
+      providerAccountEmail: input.providerAccountEmail ?? existing?.providerAccountEmail,
       scopes: [...input.scopes],
       accessToken: input.accessToken ?? existing?.accessToken,
       refreshToken: input.refreshToken ?? existing?.refreshToken ?? "",

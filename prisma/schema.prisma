@@ -191,7 +191,7 @@ model CalendarConnection {
   id                    String   @id @default(cuid())
   clinicId              String
   provider              String
-  providerAccountEmail  String
+  providerAccountEmail  String?
   scopesJson            String
   encryptedAccessToken  String?
   encryptedRefreshToken String
