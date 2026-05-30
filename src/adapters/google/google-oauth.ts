@@ -85,6 +85,9 @@ export class GoogleOAuthService {
   async handleCallback(code: string, state: string) {
     const statePayload = decodeGoogleOAuthState(state, this.config.stateSecret);
     const clinicId = statePayload.clinicId;
+    const returnPath = statePayload.returnPath
+      ? assertSignedReturnPath(statePayload.returnPath, clinicId)
+      : undefined;
     const { tokens } = await this.client.getToken({ code });
     const refreshToken = tokens.refresh_token ?? undefined;
     const existingCredentials = refreshToken
@@ -106,7 +109,7 @@ export class GoogleOAuthService {
       expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined
     });
 
-    return { clinicId, returnPath: statePayload.returnPath };
+    return { clinicId, returnPath };
   }
 }
 
@@ -154,13 +157,57 @@ function decodeGoogleOAuthState(state: string, stateSecret: string) {
 }
 
 function assertAllowedReturnPath(returnPath: string, clinicId: string) {
-  if (
-    returnPath.startsWith(`/internal/onboarding/clinics/${encodeURIComponent(clinicId)}`) ||
-    returnPath.startsWith(`/internal/onboarding/clinics/${clinicId}`)
-  ) {
+  const allowedPathname = `/internal/onboarding/clinics/${encodeURIComponent(clinicId)}`;
+  const parsedReturnPath = parseRelativeSameOriginReturnPath(returnPath);
+
+  if (parsedReturnPath.pathname === allowedPathname) {
     return returnPath;
   }
   throw new Error("Invalid Google OAuth return path");
+}
+
+function assertSignedReturnPath(returnPath: string, clinicId: string) {
+  try {
+    return assertAllowedReturnPath(returnPath, clinicId);
+  } catch {
+    throw new GoogleOAuthInvalidStateError();
+  }
+}
+
+function parseRelativeSameOriginReturnPath(returnPath: string) {
+  if (
+    !returnPath.startsWith("/") ||
+    returnPath.startsWith("//") ||
+    returnPath.includes("\\")
+  ) {
+    throw new Error("Invalid Google OAuth return path");
+  }
+
+  const pathnameEnd = findPathnameEnd(returnPath);
+  const rawPathname = returnPath.slice(0, pathnameEnd);
+  if (hasDotSegment(rawPathname)) {
+    throw new Error("Invalid Google OAuth return path");
+  }
+
+  return new URL(returnPath, "http://momentum.local");
+}
+
+function findPathnameEnd(returnPath: string) {
+  const queryIndex = returnPath.indexOf("?");
+  const hashIndex = returnPath.indexOf("#");
+  const indexes = [queryIndex, hashIndex].filter((index) => index >= 0);
+  return indexes.length === 0 ? returnPath.length : Math.min(...indexes);
+}
+
+function hasDotSegment(pathname: string) {
+  return pathname.split("/").some((segment) => {
+    try {
+      const decodedSegment = decodeURIComponent(segment);
+      return decodedSegment === "." || decodedSegment === "..";
+    } catch {
+      throw new Error("Invalid Google OAuth return path");
+    }
+  });
 }
 
 function signOAuthState(payload: string, stateSecret: string) {

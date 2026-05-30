@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { InMemoryCalendarCredentialRepository } from "../src/adapters/memory/calendar-auth-repository.js";
@@ -336,6 +337,47 @@ describe("Google Calendar OAuth routes", () => {
     ).toThrow("Invalid Google OAuth return path");
   });
 
+  it("rejects OAuth return paths that only prefix-match the clinic path", () => {
+    const repository = new InMemoryCalendarCredentialRepository();
+    const service = new GoogleOAuthService(
+      config,
+      repository,
+      () => new FakeGoogleOAuthClient(config)
+    );
+
+    for (const returnPath of [
+      "/internal/onboarding/clinics/clinic_10?googleCalendar=connected",
+      "/internal/onboarding/clinics/clinic_1-extra",
+      "/internal/onboarding/clinics/clinic_1/../../leads"
+    ]) {
+      expect(() =>
+        service.createAuthorizationUrl("clinic_1", {
+          returnPath
+        })
+      ).toThrow("Invalid Google OAuth return path");
+    }
+  });
+
+  it("rejects OAuth return paths that are not relative same-origin paths", () => {
+    const repository = new InMemoryCalendarCredentialRepository();
+    const service = new GoogleOAuthService(
+      config,
+      repository,
+      () => new FakeGoogleOAuthClient(config)
+    );
+
+    for (const returnPath of [
+      "//evil.example.com/internal/onboarding/clinics/clinic_1",
+      "/internal\\onboarding\\clinics\\clinic_1"
+    ]) {
+      expect(() =>
+        service.createAuthorizationUrl("clinic_1", {
+          returnPath
+        })
+      ).toThrow("Invalid Google OAuth return path");
+    }
+  });
+
   it("rejects callback tokens that do not include all required calendar scopes", async () => {
     const oauthClient = new FakeGoogleOAuthClient(config, {
       access_token: "partial_scope_access_token",
@@ -424,6 +466,33 @@ describe("Google Calendar OAuth routes", () => {
     expect(response.json()).toEqual({ error: "invalid_google_calendar_oauth_callback" });
     expect(oauthClient.tokenCalls).toEqual([]);
   });
+
+  it("returns 400 before token exchange when signed callback state has an invalid return path", async () => {
+    const oauthClient = new FakeGoogleOAuthClient(config);
+    const repository = new InMemoryCalendarCredentialRepository();
+    const service = new GoogleOAuthService(config, repository, () => oauthClient);
+    const app = buildApp({
+      googleCalendarOAuthService: service,
+      googleCalendarSetupToken: config.setupToken
+    });
+    const state = encodeTestGoogleOAuthState(
+      {
+        clinicId: "clinic_1",
+        nonce: "test_nonce",
+        returnPath: "/internal/onboarding/clinics/clinic_10?googleCalendar=connected"
+      },
+      config.stateSecret
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/integrations/google-calendar/callback?code=oauth_code&state=${encodeURIComponent(state)}`
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "invalid_google_calendar_oauth_callback" });
+    expect(oauthClient.tokenCalls).toEqual([]);
+  });
 });
 
 type FakeGoogleOAuthTokens = {
@@ -469,4 +538,13 @@ class FakeGoogleOAuthClient implements GoogleOAuthClient {
     this.tokenCalls.push(input);
     return { tokens: this.tokens };
   }
+}
+
+function encodeTestGoogleOAuthState(
+  payload: { clinicId: string; nonce: string; returnPath?: string },
+  stateSecret: string
+) {
+  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signature = createHmac("sha256", stateSecret).update(encodedPayload).digest("hex");
+  return `${encodedPayload}.${signature}`;
 }
