@@ -37,7 +37,8 @@ describe("server runtime persistence wiring", () => {
         webhookSecret: "kapso_webhook_secret",
         phoneNumberId: "123456789012345"
       },
-      calendarProvider: "fake"
+      calendarProvider: "fake",
+      aiConfig: { provider: "rules" }
     });
 
     const audit = new PrismaAuditLog(prisma);
