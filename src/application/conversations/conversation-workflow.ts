@@ -75,6 +75,10 @@ export class ConversationWorkflow {
       return await this.pauseForHandoff(input);
     }
 
+    if (hasMedicalSafetyLanguage(input.text)) {
+      return await this.pauseForHandoff(input);
+    }
+
     const pendingDataResult = await this.tryCompletePendingPatientData(input, conversation, intent);
     if (pendingDataResult) {
       return pendingDataResult;
@@ -199,9 +203,10 @@ export class ConversationWorkflow {
 
     if (slots.length === 0) {
       await this.clearPendingBooking(input.clinicId, input.conversationId);
+      const faqPrefix = buildBookingFaqPrefix(profile, intent);
       return {
         kind: "reply",
-        text: `No encontre horarios disponibles para ${service.name} esta semana. Te aviso si se libera un turno o podes decirme otro dia.`
+        text: `${faqPrefix}No encontre horarios disponibles para ${service.name} esta semana. Te aviso si se libera un turno o podes decirme otro dia.`
       };
     }
 
@@ -222,9 +227,10 @@ export class ConversationWorkflow {
       endsAt: first.endsAt
     });
 
+    const faqPrefix = buildBookingFaqPrefix(profile, intent);
     return {
       kind: "reply",
-      text: `Tengo este horario: ${first.startsAt.toISOString()} con disponibilidad para ${service.name}. Si te sirve, lo confirmamos.`
+      text: `${faqPrefix}Tengo este horario: ${first.startsAt.toISOString()} con disponibilidad para ${service.name}. Si te sirve, lo confirmamos.`
     };
   }
 
@@ -305,7 +311,7 @@ export class ConversationWorkflow {
       return undefined;
     }
 
-    if (!canTreatMessageAsPatientData(intent)) {
+    if (!canTreatMessageAsPatientData(input.text, intent)) {
       return undefined;
     }
 
@@ -413,8 +419,14 @@ function looksLikeFullName(text: string) {
   return normalized ? normalized.split(" ").length >= 2 : false;
 }
 
-function canTreatMessageAsPatientData(intent: ConversationUnderstanding) {
-  return (intent.intent === "question" || intent.intent === "unknown") && !intent.requiresHuman;
+function canTreatMessageAsPatientData(text: string, intent: ConversationUnderstanding) {
+  return (
+    intent.provider !== "fallback" &&
+    intent.intent === "question" &&
+    !intent.requiresHuman &&
+    !hasMedicalSafetyLanguage(text) &&
+    !hasOperationalActionLanguage(text)
+  );
 }
 
 function isLowConfidenceSideEffectIntent(intent: ConversationUnderstanding) {
@@ -427,6 +439,46 @@ function isLowConfidenceSideEffectIntent(intent: ConversationUnderstanding) {
   }
 
   return intent.intent === "confirm" || intent.intent === "cancel" || intent.intent === "reschedule";
+}
+
+function buildBookingFaqPrefix(profile: Parameters<typeof buildFaqResponse>[0], intent: ConversationUnderstanding) {
+  if (!hasRequestedFaqTopic(intent)) {
+    return "";
+  }
+
+  return `${buildFaqResponse(profile, intent) ?? missingConfiguredFaqResponse} `;
+}
+
+function hasMedicalSafetyLanguage(text: string) {
+  const normalized = normalizeText(text);
+  return (
+    normalized.includes("embaraz") ||
+    normalized.includes("me duele") ||
+    normalized.includes("dolor") ||
+    normalized.includes("sangrado") ||
+    normalized.includes("fiebre") ||
+    normalized.includes("infeccion") ||
+    normalized.includes("infectad") ||
+    normalized.includes("hinchad") ||
+    normalized.includes("reaccion") ||
+    normalized.includes("alerg") ||
+    normalized.includes("me recomendas") ||
+    normalized.includes("puedo hacerme")
+  );
+}
+
+function hasOperationalActionLanguage(text: string) {
+  const normalized = normalizeText(text);
+  return (
+    normalized.includes("turno") ||
+    normalized.includes("reserv") ||
+    normalized.includes("agend") ||
+    normalized.includes("cancel") ||
+    normalized.includes("anular") ||
+    normalized.includes("reprogram") ||
+    normalized.includes("cambiar") ||
+    normalized.includes("confirm")
+  );
 }
 
 function normalizeFullName(text: string) {
