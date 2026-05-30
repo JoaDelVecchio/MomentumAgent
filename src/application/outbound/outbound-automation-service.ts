@@ -85,28 +85,20 @@ export class OutboundAutomationService {
     now: Date;
     summary: OutboundAutomationSummary;
   }) {
-    const patient = await this.options.repos.getPatient(input.appointment.patientId);
-    if (!patient) {
-      input.summary.blocked += 1;
-      await this.auditBlocked({
-        clinicId: input.appointment.clinicId,
-        appointmentId: input.appointment.id,
-        reason: "missing_patient"
-      });
-      return;
-    }
-
-    const conversations = await this.options.repos.listConversationsByPatient({
-      clinicId: input.appointment.clinicId,
-      patientId: input.appointment.patientId
-    });
     const key = reminderDeliveryKey(input.appointment.id, input.kind);
+    const patient = await this.options.repos.getPatient(input.appointment.patientId);
+    const conversations = patient
+      ? await this.options.repos.listConversationsByPatient({
+          clinicId: input.appointment.clinicId,
+          patientId: input.appointment.patientId
+        })
+      : [];
     const claim = await this.options.repos.claimOutboundDelivery({
       key,
       clinicId: input.appointment.clinicId,
       automationType: "reminder",
-      toWhatsappNumber: patient.whatsappNumber,
-      patientId: patient.id,
+      toWhatsappNumber: patient?.whatsappNumber ?? "",
+      patientId: input.appointment.patientId,
       conversationId: conversations[0]?.id,
       appointmentId: input.appointment.id,
       templateName: reminderTemplateName(input.kind),
@@ -119,6 +111,12 @@ export class OutboundAutomationService {
 
     if (claim.kind === "existing") {
       input.summary.skipped += 1;
+      return;
+    }
+
+    if (!patient) {
+      input.summary.blocked += 1;
+      await this.blockDelivery({ delivery: claim.delivery, reason: "missing_patient", now: input.now });
       return;
     }
 

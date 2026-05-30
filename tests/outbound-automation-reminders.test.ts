@@ -92,6 +92,34 @@ describe("OutboundAutomationService reminders", () => {
     expect(context.provider.sentTemplateMessages).toEqual([]);
   });
 
+  it("persists missing-patient reminder blocks and skips duplicate runs", async () => {
+    const context = await buildReminderContext({
+      appointmentStartsAt: new Date("2026-06-03T12:00:00.000Z"),
+      appointment: { patientId: "pat_missing" }
+    });
+
+    const firstSummary = await context.service.runDueReminders({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:00:00.000Z")
+    });
+    const duplicateSummary = await context.service.runDueReminders({
+      clinicId: "clinic_1",
+      now: new Date("2026-06-02T12:00:00.000Z")
+    });
+
+    expect(firstSummary).toEqual({ sent: 0, blocked: 1, failed: 0, skipped: 0 });
+    expect(duplicateSummary).toEqual({ sent: 0, blocked: 0, failed: 0, skipped: 1 });
+    expect(await context.repos.getOutboundDelivery("reminder:appt_1:24h")).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        failureReason: "missing_patient",
+        appointmentId: "appt_1",
+        patientId: "pat_missing"
+      })
+    );
+    expect(context.provider.sentTemplateMessages).toEqual([]);
+  });
+
   it("records failed deliveries when WhatsApp sending fails", async () => {
     const context = await buildReminderContext({
       appointmentStartsAt: new Date("2026-06-03T12:00:00.000Z")
