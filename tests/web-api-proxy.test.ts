@@ -52,6 +52,28 @@ describe("web API proxy", () => {
       body: '{"clinicName":"Derma Sur"}'
     });
   });
+
+  it("rejects dot-segment proxy paths before they can escape the backend base path", async () => {
+    const observed = await withBackendServer(async (baseUrl, requests) => {
+      process.env.MOMENTUM_API_BASE_URL = `${baseUrl}/base/`;
+      delete process.env.NEXT_PUBLIC_API_BASE_URL;
+
+      const response = await POST(
+        new Request("http://127.0.0.1:3001/api/backend/../internal", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ clinicName: "Derma Sur" })
+        }),
+        { params: Promise.resolve({ path: ["..", "internal"] }) }
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({ error: "invalid_proxy_path" });
+      return requests;
+    });
+
+    expect(observed).toEqual([]);
+  });
 });
 
 type ObservedRequest = {

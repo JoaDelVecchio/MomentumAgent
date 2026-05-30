@@ -24,7 +24,12 @@ export async function PUT(request: Request, context: BackendRouteContext) {
 }
 
 async function proxyBackendRequest(request: Request, context: BackendRouteContext): Promise<Response> {
-  const targetUrl = await buildBackendUrl(request, context);
+  const { path = [] } = await context.params;
+  if (path.some(isUnsafePathSegment)) {
+    return Response.json({ error: "invalid_proxy_path" }, { status: 400 });
+  }
+
+  const targetUrl = buildBackendUrl(request, path);
   const init: RequestInit = {
     method: request.method,
     headers: headersForBackend(request),
@@ -43,12 +48,15 @@ async function proxyBackendRequest(request: Request, context: BackendRouteContex
   });
 }
 
-async function buildBackendUrl(request: Request, context: BackendRouteContext): Promise<URL> {
-  const { path = [] } = await context.params;
+function buildBackendUrl(request: Request, path: string[]): URL {
   const inboundUrl = new URL(request.url);
   const backendUrl = new URL(path.map(encodeURIComponent).join("/"), backendBaseUrl());
   backendUrl.search = inboundUrl.search;
   return backendUrl;
+}
+
+function isUnsafePathSegment(segment: string): boolean {
+  return segment.length === 0 || segment === "." || segment === "..";
 }
 
 function backendBaseUrl(): string {
