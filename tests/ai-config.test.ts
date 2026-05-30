@@ -9,9 +9,9 @@ describe("readAIConfig", () => {
   it("reads OpenAI interpreter settings", () => {
     expect(
       readAIConfig({
-        AI_INTERPRETER_PROVIDER: "openai",
-        OPENAI_API_KEY: "sk-test",
-        OPENAI_MODEL: "gpt-5-mini",
+        AI_INTERPRETER_PROVIDER: " openai ",
+        OPENAI_API_KEY: " sk-test ",
+        OPENAI_MODEL: " gpt-5-mini ",
         OPENAI_TIMEOUT_MS: "1200"
       })
     ).toEqual({
@@ -26,5 +26,42 @@ describe("readAIConfig", () => {
     expect(() => readAIConfig({ AI_INTERPRETER_PROVIDER: "openai" })).toThrow(
       "OPENAI_API_KEY is required when AI_INTERPRETER_PROVIDER=openai"
     );
+  });
+
+  it("rejects unsupported providers", () => {
+    expect(() => readAIConfig({ AI_INTERPRETER_PROVIDER: "anthropic" })).toThrow(
+      "Unsupported AI_INTERPRETER_PROVIDER: anthropic"
+    );
+  });
+
+  it("rejects whitespace-only OpenAI API keys", () => {
+    expect(() =>
+      readAIConfig({
+        AI_INTERPRETER_PROVIDER: "openai",
+        OPENAI_API_KEY: "   "
+      })
+    ).toThrow("OPENAI_API_KEY is required when AI_INTERPRETER_PROVIDER=openai");
+  });
+
+  it("rejects whitespace-only OpenAI models", () => {
+    expect(() =>
+      readAIConfig({
+        AI_INTERPRETER_PROVIDER: "openai",
+        OPENAI_API_KEY: "sk-test",
+        OPENAI_MODEL: "   "
+      })
+    ).toThrow("OPENAI_MODEL must not be empty when provided");
+  });
+
+  it("rejects invalid OpenAI timeouts", () => {
+    for (const timeoutMs of ["abc", "Infinity", "1.5", "0", "-1"]) {
+      expect(() =>
+        readAIConfig({
+          AI_INTERPRETER_PROVIDER: "openai",
+          OPENAI_API_KEY: "sk-test",
+          OPENAI_TIMEOUT_MS: timeoutMs
+        })
+      ).toThrow("OPENAI_TIMEOUT_MS must be a positive finite integer");
+    }
   });
 });
