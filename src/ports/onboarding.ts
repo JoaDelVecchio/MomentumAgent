@@ -50,9 +50,11 @@ export type ClinicSetupRecord = {
   calendarConnected: boolean;
   testConversationPassed: boolean;
   activationChecklistCompleted: boolean;
-  createdAt?: Date;
+  createdAt: Date;
   updatedAt: Date;
 };
+
+export type ClinicSetupUpsertInput = Omit<ClinicSetupRecord, "createdAt">;
 
 export type ClinicKnowledgeCategory =
   | "payment_methods"
@@ -82,7 +84,7 @@ export interface OnboardingRepository {
   listLeads(): MaybePromise<ClinicLeadRecord[]>;
   getLead(leadId: Id): MaybePromise<ClinicLeadRecord | undefined>;
   markLeadConverted(input: { leadId: Id; clinicId: Id; updatedAt: Date }): MaybePromise<void>;
-  upsertClinicSetup(input: ClinicSetupRecord): MaybePromise<ClinicSetupRecord>;
+  upsertClinicSetup(input: ClinicSetupUpsertInput): MaybePromise<ClinicSetupRecord>;
   getClinicSetup(clinicId: Id): MaybePromise<ClinicSetupRecord | undefined>;
   listClinicSetups(): MaybePromise<ClinicSetupRecord[]>;
   updateClinicLifecycle(input: {

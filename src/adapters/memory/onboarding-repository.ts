@@ -4,6 +4,7 @@ import type {
   ClinicLeadInput,
   ClinicLeadRecord,
   ClinicSetupRecord,
+  ClinicSetupUpsertInput,
   OnboardingRepository
 } from "../../ports/onboarding.js";
 
@@ -49,11 +50,11 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
     });
   }
 
-  async upsertClinicSetup(input: ClinicSetupRecord): Promise<ClinicSetupRecord> {
+  async upsertClinicSetup(input: ClinicSetupUpsertInput): Promise<ClinicSetupRecord> {
     const existing = this.setups.get(input.clinicId);
     const setup: ClinicSetupRecord = {
       ...input,
-      createdAt: existing?.createdAt ? new Date(existing.createdAt) : new Date(input.updatedAt),
+      createdAt: existing ? new Date(existing.createdAt) : new Date(input.updatedAt),
       updatedAt: new Date(input.updatedAt)
     };
     this.setups.set(input.clinicId, cloneSetup(setup));
@@ -149,7 +150,7 @@ function cloneLead(lead: ClinicLeadRecord): ClinicLeadRecord {
 function cloneSetup(setup: ClinicSetupRecord): ClinicSetupRecord {
   return {
     ...setup,
-    createdAt: setup.createdAt ? new Date(setup.createdAt) : undefined,
+    createdAt: new Date(setup.createdAt),
     updatedAt: new Date(setup.updatedAt)
   };
 }

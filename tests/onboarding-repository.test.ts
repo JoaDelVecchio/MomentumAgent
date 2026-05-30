@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryOnboardingRepository } from "../src/adapters/memory/onboarding-repository.js";
+import type { ClinicLeadInput, ClinicSetupUpsertInput } from "../src/ports/onboarding.js";
 
 describe("onboarding repository contract", () => {
   it("creates qualified landing leads and lists newest first", async () => {
@@ -264,5 +265,189 @@ describe("onboarding repository contract", () => {
         answer: "Aceptamos transferencia, efectivo y tarjeta."
       })
     ]);
+  });
+
+  it("does not retain caller-owned Date references from lead input", async () => {
+    const repo = new InMemoryOnboardingRepository();
+    const submittedAt = new Date("2026-06-01T12:00:00.000Z");
+    const input: ClinicLeadInput = {
+      contactName: "Ana Manager",
+      clinicName: "Clinica Norte",
+      whatsappOrPhone: "+5491111111111",
+      city: "Buenos Aires",
+      country: "Argentina",
+      professionalCount: 3,
+      currentSchedulingSystem: "Google Calendar",
+      monthlyWhatsappInquiries: "200-500",
+      mainPain: "missed_leads",
+      source: "landing",
+      submittedAt
+    };
+
+    const created = await repo.createLead(input);
+    submittedAt.setUTCFullYear(2030);
+
+    const stored = await repo.getLead(created.id);
+    expect(stored?.submittedAt).toEqual(new Date("2026-06-01T12:00:00.000Z"));
+    expect(created.submittedAt).not.toBe(input.submittedAt);
+    expect(created.createdAt).not.toBe(input.submittedAt);
+    expect(created.updatedAt).not.toBe(input.submittedAt);
+  });
+
+  it("returns immutable lead, setup, and knowledge records from reads", async () => {
+    const repo = new InMemoryOnboardingRepository();
+    const lead = await repo.createLead({
+      contactName: "Ana Manager",
+      clinicName: "Clinica Norte",
+      whatsappOrPhone: "+5491111111111",
+      city: "Buenos Aires",
+      country: "Argentina",
+      professionalCount: 3,
+      currentSchedulingSystem: "Google Calendar",
+      monthlyWhatsappInquiries: "200-500",
+      mainPain: "missed_leads",
+      source: "landing",
+      submittedAt: new Date("2026-06-01T12:00:00.000Z")
+    });
+    await repo.upsertClinicSetup({
+      clinicId: "clinic_1",
+      source: "presencial",
+      lifecycleState: "setup",
+      paymentStatus: "unpaid",
+      primaryContactName: "Ana Manager",
+      primaryContactPhone: "+5491111111111",
+      city: "Buenos Aires",
+      country: "Argentina",
+      whatsappReady: false,
+      calendarConnected: false,
+      testConversationPassed: false,
+      activationChecklistCompleted: false,
+      updatedAt: new Date("2026-06-01T12:01:00.000Z")
+    });
+    await repo.upsertClinicKnowledge({
+      id: "knowledge_payment",
+      clinicId: "clinic_1",
+      category: "payment_methods",
+      question: "Como se puede pagar?",
+      answer: "Aceptamos transferencia.",
+      updatedAt: new Date("2026-06-01T12:02:00.000Z")
+    });
+
+    const readLead = await repo.getLead(lead.id);
+    const readSetup = await repo.getClinicSetup("clinic_1");
+    const [readKnowledge] = await repo.listClinicKnowledge("clinic_1");
+    readLead?.submittedAt.setUTCFullYear(2030);
+    readSetup?.updatedAt.setUTCFullYear(2030);
+    readKnowledge.updatedAt.setUTCFullYear(2030);
+
+    await expect(repo.getLead(lead.id)).resolves.toEqual(
+      expect.objectContaining({ submittedAt: new Date("2026-06-01T12:00:00.000Z") })
+    );
+    await expect(repo.getClinicSetup("clinic_1")).resolves.toEqual(
+      expect.objectContaining({ updatedAt: new Date("2026-06-01T12:01:00.000Z") })
+    );
+    await expect(repo.listClinicKnowledge("clinic_1")).resolves.toEqual([
+      expect.objectContaining({ updatedAt: new Date("2026-06-01T12:02:00.000Z") })
+    ]);
+  });
+
+  it("returns separate Date instances with the same time value across reads", async () => {
+    const repo = new InMemoryOnboardingRepository();
+    const lead = await repo.createLead({
+      contactName: "Ana Manager",
+      clinicName: "Clinica Norte",
+      whatsappOrPhone: "+5491111111111",
+      city: "Buenos Aires",
+      country: "Argentina",
+      professionalCount: 3,
+      currentSchedulingSystem: "Google Calendar",
+      monthlyWhatsappInquiries: "200-500",
+      mainPain: "missed_leads",
+      source: "landing",
+      submittedAt: new Date("2026-06-01T12:00:00.000Z")
+    });
+    await repo.upsertClinicSetup({
+      clinicId: "clinic_1",
+      source: "presencial",
+      lifecycleState: "setup",
+      paymentStatus: "unpaid",
+      primaryContactName: "Ana Manager",
+      primaryContactPhone: "+5491111111111",
+      city: "Buenos Aires",
+      country: "Argentina",
+      whatsappReady: false,
+      calendarConnected: false,
+      testConversationPassed: false,
+      activationChecklistCompleted: false,
+      updatedAt: new Date("2026-06-01T12:01:00.000Z")
+    });
+
+    const firstLeadRead = await repo.getLead(lead.id);
+    const secondLeadRead = await repo.getLead(lead.id);
+    const firstSetupRead = await repo.getClinicSetup("clinic_1");
+    const secondSetupRead = await repo.getClinicSetup("clinic_1");
+
+    expect(firstLeadRead?.submittedAt).not.toBe(secondLeadRead?.submittedAt);
+    expect(firstLeadRead?.submittedAt.getTime()).toBe(secondLeadRead?.submittedAt.getTime());
+    expect(firstSetupRead?.createdAt).not.toBe(secondSetupRead?.createdAt);
+    expect(firstSetupRead?.createdAt.getTime()).toBe(secondSetupRead?.createdAt.getTime());
+  });
+
+  it("returns undefined for missing lead and clinic setup records", async () => {
+    const repo = new InMemoryOnboardingRepository();
+
+    await expect(repo.getLead("missing")).resolves.toBeUndefined();
+    await expect(repo.getClinicSetup("missing")).resolves.toBeUndefined();
+  });
+
+  it("throws descriptive errors when mutating missing records", async () => {
+    const repo = new InMemoryOnboardingRepository();
+
+    await expect(
+      repo.markLeadConverted({
+        leadId: "missing_lead",
+        clinicId: "clinic_1",
+        updatedAt: new Date("2026-06-01T12:00:00.000Z")
+      })
+    ).rejects.toThrow("Clinic lead missing_lead not found");
+    await expect(
+      repo.updateClinicLifecycle({
+        clinicId: "missing_clinic",
+        lifecycleState: "active",
+        updatedAt: new Date("2026-06-01T12:00:00.000Z")
+      })
+    ).rejects.toThrow("Clinic setup missing_clinic not found");
+    await expect(
+      repo.updateReadinessFlags({
+        clinicId: "missing_clinic",
+        whatsappReady: true,
+        updatedAt: new Date("2026-06-01T12:00:00.000Z")
+      })
+    ).rejects.toThrow("Clinic setup missing_clinic not found");
+  });
+
+  it("derives clinic setup createdAt and excludes caller-owned createdAt from input", async () => {
+    const repo = new InMemoryOnboardingRepository();
+    const input: ClinicSetupUpsertInput = {
+      clinicId: "clinic_1",
+      source: "presencial",
+      lifecycleState: "setup",
+      paymentStatus: "unpaid",
+      primaryContactName: "Ana Manager",
+      primaryContactPhone: "+5491111111111",
+      city: "Buenos Aires",
+      country: "Argentina",
+      whatsappReady: false,
+      calendarConnected: false,
+      testConversationPassed: false,
+      activationChecklistCompleted: false,
+      updatedAt: new Date("2026-06-01T12:00:00.000Z"),
+      // @ts-expect-error createdAt is persisted state, not caller input.
+      createdAt: new Date("2030-01-01T12:00:00.000Z")
+    };
+
+    const setup = await repo.upsertClinicSetup(input);
+
+    expect(setup.createdAt).toEqual(new Date("2026-06-01T12:00:00.000Z"));
   });
 });
