@@ -3,6 +3,10 @@ import type { GoogleOAuthService } from "../adapters/google/google-oauth.js";
 import type { CalendarProvider } from "../dev/seed.js";
 import type { ClinicActivationGuard } from "../ports/activation.js";
 import type { CalendarPort } from "../ports/calendar.js";
+import {
+  registerGoogleCalendarOnboardingRoutes,
+  type GoogleCalendarOnboardingRoutesOptions
+} from "./google-calendar-onboarding-routes.js";
 import { registerGoogleCalendarRoutes } from "./google-calendar-routes.js";
 import {
   registerOutboundAutomationRoutes,
@@ -25,6 +29,7 @@ type BuildAppOptions = {
   whatsappKapsoWebhook?: WhatsAppKapsoWebhookRoutesOptions;
   outboundAutomation?: OutboundAutomationRoutesOptions;
   onboarding?: OnboardingRoutesOptions;
+  googleCalendarOnboarding?: GoogleCalendarOnboardingRoutesOptions;
   clinicActivation?: ClinicActivationGuard;
 };
 
@@ -69,6 +74,10 @@ export function buildApp(options: BuildAppOptions = {}) {
 
   if (options.onboarding) {
     registerOnboardingRoutes(app, options.onboarding);
+  }
+
+  if (options.googleCalendarOnboarding) {
+    registerGoogleCalendarOnboardingRoutes(app, options.googleCalendarOnboarding);
   }
 
   return app;

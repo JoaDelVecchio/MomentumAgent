@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { OnboardingService } from "../application/onboarding/onboarding-service.js";
@@ -8,6 +7,7 @@ import {
 } from "../application/onboarding/test-mode-service.js";
 import { parseClinicProfile, type ClinicProfileInput } from "../domain/clinic-profile.js";
 import { DomainError } from "../domain/errors.js";
+import { isAuthorized } from "./internal-auth.js";
 
 const leadSchema = z.object({
   contactName: z.string().trim().min(1),
@@ -324,29 +324,6 @@ export function registerOnboardingRoutes(app: FastifyInstance, options: Onboardi
       throw error;
     }
   });
-}
-
-function readBearerToken(authorization: string | string[] | undefined) {
-  if (!authorization || Array.isArray(authorization)) {
-    return undefined;
-  }
-
-  const match = /^Bearer\s+(.+)$/iu.exec(authorization);
-  return match?.[1];
-}
-
-function isAuthorized(authorization: string | string[] | undefined, expected: string) {
-  const actual = readBearerToken(authorization);
-  if (!actual) {
-    return false;
-  }
-
-  const actualBuffer = Buffer.from(actual);
-  const expectedBuffer = Buffer.from(expected);
-  return (
-    actualBuffer.length === expectedBuffer.length &&
-    timingSafeEqual(actualBuffer, expectedBuffer)
-  );
 }
 
 function isNotFoundError(error: unknown): boolean {

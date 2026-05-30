@@ -45,6 +45,13 @@ export class GoogleCalendarOnboardingService {
     });
   }
 
+  createAuthorizationUrl(clinicId: string, returnPath: string): string {
+    if (!this.options.oauthService) {
+      throw new GoogleCalendarOnboardingError("google_calendar_oauth_not_configured");
+    }
+    return this.options.oauthService.createAuthorizationUrl(clinicId, { returnPath });
+  }
+
   async listCalendars(clinicId: string): Promise<GoogleCalendarSummary[]> {
     const status = await this.status(clinicId);
     if (!status.connected) {
@@ -64,6 +71,7 @@ export class GoogleCalendarOnboardingError extends Error {
       | "google_calendar_not_connected"
       | "google_calendar_reconnect_required"
       | "google_calendar_calendar_not_bookable"
+      | "google_calendar_oauth_not_configured"
   ) {
     super(code);
   }
