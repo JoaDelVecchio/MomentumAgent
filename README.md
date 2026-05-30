@@ -136,6 +136,21 @@ KAPSO_BUSINESS_ACCOUNT_ID="..."
 MOMENTUM_PUBLIC_WEBHOOK_URL="https://your-tunnel.example.com"
 ```
 
+When `WHATSAPP_PROVIDER=kapso`, Momentum stores operational patient-agent state in Prisma:
+
+- patients;
+- conversations and pending bookings;
+- appointments;
+- opt-out;
+- processed webhook delivery keys;
+- audit events.
+
+Run Prisma migrations before real webhook testing:
+
+```bash
+npm run prisma:migrate -- --name init
+```
+
 Local smoke test:
 
 1. Start the API:
