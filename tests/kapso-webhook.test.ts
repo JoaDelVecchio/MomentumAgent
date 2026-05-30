@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { InMemoryAuditLog } from "../src/adapters/memory/audit-log.js";
+import { FakeWhatsAppProvider } from "../src/adapters/memory/fake-whatsapp-provider.js";
+import { InMemoryRepositories } from "../src/adapters/memory/repositories.js";
 import {
   KapsoWebhookPayloadError,
   normalizeKapsoInboundMessage
 } from "../src/adapters/whatsapp/kapso/types.js";
+import { WhatsAppInboundService } from "../src/application/messaging/whatsapp-inbound-service.js";
+import type { WorkflowResult } from "../src/application/conversations/conversation-workflow.js";
 import {
   createKapsoWebhookSignature,
   verifyKapsoWebhookSignature
@@ -115,6 +120,109 @@ describe("Kapso webhook signatures", () => {
   });
 });
 
+describe("WhatsAppInboundService", () => {
+  it("calls the conversation workflow and sends reply text through the provider", async () => {
+    const context = buildInboundServiceContext({ kind: "reply", text: "Tengo un turno disponible." });
+
+    const result = await context.service.handleInboundMessage(normalizedInboundMessage());
+
+    expect(result).toEqual({
+      status: "sent",
+      workflowResult: "reply",
+      providerMessageId: "msg_1"
+    });
+    expect(context.workflow.calls).toEqual([
+      {
+        clinicId: "clinic_1",
+        conversationId: "conv_123",
+        patientId: "whatsapp:16315551181",
+        whatsappNumber: "16315551181",
+        text: "Quiero reservar botox"
+      }
+    ]);
+    expect(context.provider.sentTextMessages).toEqual([
+      {
+        clinicId: "clinic_1",
+        to: "16315551181",
+        text: "Tengo un turno disponible.",
+        providerMessageId: "msg_1"
+      }
+    ]);
+    expect(context.repos.hasProcessedWebhookDelivery("delivery_1")).toBe(true);
+  });
+
+  it("sends the handoff text once when the workflow asks for handoff", async () => {
+    const context = buildInboundServiceContext({
+      kind: "handoff",
+      text: "Te derivo con recepcion por este mismo chat."
+    });
+
+    const result = await context.service.handleInboundMessage(normalizedInboundMessage());
+
+    expect(result).toEqual({
+      status: "sent",
+      workflowResult: "handoff",
+      providerMessageId: "msg_1"
+    });
+    expect(context.provider.sentTextMessages).toHaveLength(1);
+    expect(context.provider.sentTextMessages[0].text).toBe(
+      "Te derivo con recepcion por este mismo chat."
+    );
+  });
+
+  it("does not send automated replies when the conversation is already bot-paused", async () => {
+    const context = buildInboundServiceContext({ kind: "reply", text: "No deberia enviarse." });
+    context.repos.saveConversation({
+      id: "conv_123",
+      clinicId: "clinic_1",
+      patientId: "whatsapp:16315551181",
+      botPaused: true,
+      createdAt: new Date("2026-05-29T11:00:00.000Z"),
+      updatedAt: new Date("2026-05-29T11:00:00.000Z")
+    });
+
+    const result = await context.service.handleInboundMessage(normalizedInboundMessage());
+
+    expect(result).toEqual({ status: "bot_paused" });
+    expect(context.workflow.calls).toEqual([]);
+    expect(context.provider.sentTextMessages).toEqual([]);
+    expect(context.repos.hasProcessedWebhookDelivery("delivery_1")).toBe(true);
+  });
+
+  it("ignores duplicate idempotency keys without sending a second reply", async () => {
+    const context = buildInboundServiceContext({ kind: "reply", text: "Tengo un turno disponible." });
+    context.repos.markProcessedWebhookDelivery("delivery_1");
+
+    const result = await context.service.handleInboundMessage(normalizedInboundMessage());
+
+    expect(result).toEqual({ status: "ignored_duplicate" });
+    expect(context.workflow.calls).toEqual([]);
+    expect(context.provider.sentTextMessages).toEqual([]);
+  });
+
+  it("audits send failures and leaves the delivery retryable", async () => {
+    const context = buildInboundServiceContext({ kind: "reply", text: "Tengo un turno disponible." });
+    context.provider.failNextSend("kapso unavailable");
+
+    await expect(context.service.handleInboundMessage(normalizedInboundMessage())).rejects.toMatchObject({
+      name: "WhatsAppProviderError"
+    });
+
+    expect(context.repos.hasProcessedWebhookDelivery("delivery_1")).toBe(false);
+    expect(await context.audit.list()).toContainEqual(
+      expect.objectContaining({
+        clinicId: "clinic_1",
+        conversationId: "conv_123",
+        type: "whatsapp.outbound.failed",
+        metadata: {
+          providerMessageId: "wamid.123",
+          providerPhoneNumberId: "123456789012345"
+        }
+      })
+    );
+  });
+});
+
 function kapsoReceivedMessagePayload() {
   return {
     event: "whatsapp.message.received",
@@ -165,4 +273,56 @@ function kapsoReceivedMessagePayloadWithOptionalPhoneFields() {
       phone_number?: string;
     };
   };
+}
+
+function normalizedInboundMessage() {
+  return {
+    clinicId: "clinic_1",
+    providerPhoneNumberId: "123456789012345",
+    providerMessageId: "wamid.123",
+    conversationId: "conv_123",
+    patientId: "whatsapp:16315551181",
+    whatsappNumber: "16315551181",
+    text: "Quiero reservar botox",
+    idempotencyKey: "delivery_1",
+    receivedAt: new Date("2026-05-29T12:00:00.000Z")
+  };
+}
+
+function buildInboundServiceContext(result: WorkflowResult) {
+  const repos = new InMemoryRepositories();
+  const provider = new FakeWhatsAppProvider();
+  const audit = new InMemoryAuditLog();
+  const workflow = new FakeConversationWorkflow(result);
+  const service = new WhatsAppInboundService({
+    repos,
+    provider,
+    workflow,
+    audit
+  });
+
+  return { repos, provider, audit, workflow, service };
+}
+
+class FakeConversationWorkflow {
+  readonly calls: Array<{
+    clinicId: string;
+    conversationId: string;
+    patientId: string;
+    whatsappNumber: string;
+    text: string;
+  }> = [];
+
+  constructor(private readonly result: WorkflowResult) {}
+
+  async handleInboundMessage(input: {
+    clinicId: string;
+    conversationId: string;
+    patientId: string;
+    whatsappNumber: string;
+    text: string;
+  }) {
+    this.calls.push(input);
+    return this.result;
+  }
 }

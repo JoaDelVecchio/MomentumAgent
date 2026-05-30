@@ -36,6 +36,7 @@ export class InMemoryRepositories {
   private appointments = new Map<Id, Appointment>();
   private interests = new Map<Id, PatientInterest>();
   private optOutWhatsappNumbers = new Set<string>();
+  private processedWebhookDeliveries = new Set<string>();
   private appointmentCounter = 0;
   private appointmentLocks = new Map<Id, Promise<unknown>>();
 
@@ -123,6 +124,14 @@ export class InMemoryRepositories {
 
   isOptedOut(whatsappNumber: string) {
     return this.optOutWhatsappNumbers.has(whatsappNumber);
+  }
+
+  hasProcessedWebhookDelivery(idempotencyKey: string) {
+    return this.processedWebhookDeliveries.has(idempotencyKey);
+  }
+
+  markProcessedWebhookDelivery(idempotencyKey: string) {
+    this.processedWebhookDeliveries.add(idempotencyKey);
   }
 }
 
