@@ -190,3 +190,37 @@ https://your-tunnel.example.com/webhooks/whatsapp/kapso
 4. Send a WhatsApp text to the connected number.
 5. Verify Momentum replies through Kapso.
 6. Re-send the same webhook delivery with the same `X-Idempotency-Key` and verify it does not create a duplicate reply.
+
+## Outbound Automation Local Run
+
+Outbound automation sends approved WhatsApp templates for:
+
+- appointment reminders;
+- warm abandoned-booking reactivation;
+- freed-slot offers after cancellation or reschedule.
+
+Set an internal token to enable the cron/manual route:
+
+```bash
+OUTBOUND_AUTOMATION_TOKEN="local-outbound-token"
+```
+
+Run due reminders and reactivations:
+
+```bash
+curl -sS -X POST http://127.0.0.1:3000/internal/outbound/run \
+  -H 'authorization: Bearer local-outbound-token' \
+  -H 'content-type: application/json' \
+  -d '{"clinicId":"clinic_1"}'
+```
+
+For deterministic local testing, pass `now`:
+
+```bash
+curl -sS -X POST http://127.0.0.1:3000/internal/outbound/run \
+  -H 'authorization: Bearer local-outbound-token' \
+  -H 'content-type: application/json' \
+  -d '{"clinicId":"clinic_1","now":"2026-06-02T12:00:00.000Z"}'
+```
+
+Every outbound send is guarded by opt-out state, handoff pause, quiet hours, durable delivery keys, and audit logging.
