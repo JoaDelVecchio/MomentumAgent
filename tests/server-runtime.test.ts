@@ -98,6 +98,25 @@ describe("server runtime persistence wiring", () => {
     });
   });
 
+  it("exposes outbound automation from the Kapso runtime", async () => {
+    const runtime = await buildWhatsAppRuntime({
+      prisma,
+      clinicId: "clinic_runtime_outbound",
+      config: {
+        provider: "kapso",
+        apiKey: "kapso_api_key",
+        webhookSecret: "kapso_webhook_secret",
+        phoneNumberId: "123456789012347"
+      },
+      calendarProvider: "fake",
+      aiConfig: { provider: "rules" }
+    });
+
+    expect(runtime.outboundAutomation.runDueReminders).toEqual(expect.any(Function));
+    expect(runtime.outboundAutomation.runDueReactivations).toEqual(expect.any(Function));
+    expect(runtime.outboundAutomation.handleFreedSlot).toEqual(expect.any(Function));
+  });
+
   it("seeds the configured clinic id for Google credential persistence", async () => {
     const clinicId = "clinic_runtime_google";
     await buildGoogleCalendarRuntime({

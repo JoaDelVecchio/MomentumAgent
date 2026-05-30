@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { buildApp } from "./api/app.js";
+import { readOutboundConfig } from "./config/outbound.js";
 import { readWhatsAppConfig } from "./config/whatsapp.js";
 import type { CalendarProvider } from "./dev/seed.js";
 import {
@@ -13,6 +14,7 @@ const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? "127.0.0.1";
 const calendarProvider = readCalendarProvider(process.env.CALENDAR_PROVIDER);
 const whatsappConfig = readWhatsAppConfig(process.env);
+const outboundConfig = readOutboundConfig(process.env);
 const sharedPrisma =
   calendarProvider === "google" || whatsappConfig.provider === "kapso" ? new PrismaClient() : undefined;
 const googleRuntime =
@@ -34,7 +36,11 @@ const app = buildApp({
   simulationCalendar: googleRuntime?.calendar,
   googleCalendarOAuthService: googleRuntime?.oauthService,
   googleCalendarSetupToken: googleRuntime?.setupToken,
-  whatsappKapsoWebhook: whatsappRuntime?.webhook
+  whatsappKapsoWebhook: whatsappRuntime?.webhook,
+  outboundAutomation:
+    outboundConfig.enabled && whatsappRuntime
+      ? { token: outboundConfig.token, service: whatsappRuntime.outboundAutomation }
+      : undefined
 });
 
 await app.listen({ port, host });

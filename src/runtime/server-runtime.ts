@@ -14,7 +14,9 @@ import { KapsoWhatsAppProvider } from "../adapters/whatsapp/kapso/kapso-whatsapp
 import { ConversationWorkflow } from "../application/conversations/conversation-workflow.js";
 import type { ConversationInterpreter } from "../application/conversations/interpreter.js";
 import { RulesConversationInterpreter } from "../application/conversations/rules-interpreter.js";
+import { OutboundTemplateService } from "../application/messaging/outbound-template-service.js";
 import { WhatsAppInboundService } from "../application/messaging/whatsapp-inbound-service.js";
+import { OutboundAutomationService } from "../application/outbound/outbound-automation-service.js";
 import { SchedulingService } from "../application/scheduling/scheduling-service.js";
 import { readAIConfig, type AIConfig } from "../config/ai.js";
 import { readGoogleCalendarConfig, type GoogleCalendarConfig } from "../config/google-calendar.js";
@@ -72,19 +74,34 @@ export async function buildWhatsAppRuntime(input: {
   const repos = new PrismaOperationalRepository(input.prisma);
   await repos.upsertClinicProfile(buildDemoClinicProfile(clinicId));
   const audit = new PrismaAuditLog(input.prisma);
-  const scheduling = new SchedulingService(
-    repos,
-    input.calendar ?? buildDefaultCalendar(input.calendarProvider),
-    audit
-  );
-  const interpreter = input.interpreter ?? buildConversationInterpreter(input.aiConfig ?? readAIConfig());
-  const workflow = new ConversationWorkflow(repos, scheduling, audit, () => new Date(), interpreter);
+  const calendar = input.calendar ?? buildDefaultCalendar(input.calendarProvider);
   const provider = new KapsoWhatsAppProvider({
     apiKey: input.config.apiKey,
     phoneNumberId: input.config.phoneNumberId
   });
+  const templateService = new OutboundTemplateService({ repos, provider, audit });
+  const outboundAutomation = new OutboundAutomationService({
+    repos,
+    calendar,
+    templateService,
+    audit
+  });
+  const scheduling = new SchedulingService(
+    repos,
+    calendar,
+    audit,
+    () => new Date(),
+    {
+      handleFreedSlot: async (freedSlot) => {
+        await outboundAutomation.handleFreedSlot({ ...freedSlot, now: new Date() });
+      }
+    }
+  );
+  const interpreter = input.interpreter ?? buildConversationInterpreter(input.aiConfig ?? readAIConfig());
+  const workflow = new ConversationWorkflow(repos, scheduling, audit, () => new Date(), interpreter);
 
   return {
+    outboundAutomation,
     webhook: {
       secret: input.config.webhookSecret,
       phoneNumberClinicMap: { [input.config.phoneNumberId]: clinicId },

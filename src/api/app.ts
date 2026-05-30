@@ -3,6 +3,10 @@ import type { GoogleOAuthService } from "../adapters/google/google-oauth.js";
 import type { CalendarProvider } from "../dev/seed.js";
 import type { CalendarPort } from "../ports/calendar.js";
 import { registerGoogleCalendarRoutes } from "./google-calendar-routes.js";
+import {
+  registerOutboundAutomationRoutes,
+  type OutboundAutomationRoutesOptions
+} from "./outbound-routes.js";
 import { registerRoutes } from "./routes.js";
 import { registerWhatsAppRoutes, type WhatsAppKapsoWebhookRoutesOptions } from "./whatsapp-routes.js";
 
@@ -14,6 +18,7 @@ type BuildAppOptions = {
   googleCalendarOAuthService?: GoogleOAuthService;
   googleCalendarSetupToken?: string;
   whatsappKapsoWebhook?: WhatsAppKapsoWebhookRoutesOptions;
+  outboundAutomation?: OutboundAutomationRoutesOptions;
 };
 
 export function buildApp(options: BuildAppOptions = {}) {
@@ -43,6 +48,10 @@ export function buildApp(options: BuildAppOptions = {}) {
 
   if (options.whatsappKapsoWebhook) {
     registerWhatsAppRoutes(app, options.whatsappKapsoWebhook);
+  }
+
+  if (options.outboundAutomation) {
+    registerOutboundAutomationRoutes(app, options.outboundAutomation);
   }
 
   return app;
