@@ -145,6 +145,52 @@ describe("ConversationWorkflow with AI understanding", () => {
     ).toBeUndefined();
   });
 
+  it("uses a safe fallback when a requested configured FAQ fact is missing", async () => {
+    const { repos, workflow } = buildContext(
+      new FakeInterpreter(
+        understanding({
+          intent: "question",
+          serviceName: "Botox",
+          requestedTopics: ["price", "restrictions"]
+        })
+      )
+    );
+    repos.upsertClinicProfile(
+      parseClinicProfile({
+        clinicId: "clinic_1",
+        name: "Clinica Demo",
+        timezone: "America/Argentina/Buenos_Aires",
+        services: [
+          {
+            id: "svc_botox",
+            name: "Botox",
+            durationMinutes: 30,
+            priceText: "Desde $120.000",
+            preparation: "Evitar alcohol 24 horas antes.",
+            restrictions: [],
+            professionalIds: ["pro_perez"]
+          }
+        ],
+        professionals: [{ id: "pro_perez", name: "Dra. Perez", calendarId: "cal_perez" }],
+        appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 0, bufferMinutes: 0 },
+        requiredPatientFields: ["fullName"]
+      })
+    );
+
+    const result = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Tiene restricciones botox?"
+    });
+
+    expect(result).toEqual({
+      kind: "reply",
+      text: "No tengo ese dato configurado para responderlo con seguridad. Te derivo con recepcion si queres confirmarlo."
+    });
+  });
+
   it("answers service FAQ from configured clinic data only", async () => {
     const { workflow } = buildContext(
       new FakeInterpreter(
@@ -227,6 +273,170 @@ describe("ConversationWorkflow with AI understanding", () => {
         updatedAt: new Date("2026-05-29T12:00:00.000Z")
       })
     );
+  });
+
+  it("does not cancel an appointment from a low-confidence cancel intent", async () => {
+    const { calendar, repos, workflow } = buildContext(
+      new FakeInterpreter(
+        understanding({
+          intent: "cancel",
+          confidence: 0.1
+        })
+      )
+    );
+    repos.upsertPatient({ id: "pat_1", whatsappNumber: "+5491111111111", fullName: "Ana Gomez" });
+    const startsAt = new Date("2026-06-01T13:00:00.000Z");
+    const endsAt = new Date("2026-06-01T13:30:00.000Z");
+    calendar.seedAvailability("cal_perez", [{ startsAt, endsAt }]);
+    const event = await calendar.createEvent({
+      calendarId: "cal_perez",
+      summary: "Botox - pat_1",
+      startsAt,
+      endsAt,
+      metadata: { appointmentId: "appt_1", patientId: "pat_1", serviceId: "svc_botox" }
+    });
+    repos.saveAppointment({
+      id: "appt_1",
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      calendarEventId: event.id,
+      calendarId: "cal_perez",
+      startsAt,
+      endsAt,
+      status: "scheduled"
+    });
+
+    const result = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "cancelar"
+    });
+
+    expect(result).toEqual({
+      kind: "reply",
+      text: "No llegue a entenderlo con seguridad. Decime si queres reservar, confirmar, cancelar o cambiar un turno."
+    });
+    expect(repos.getAppointment("appt_1")?.status).toBe("scheduled");
+    expect((await calendar.getEvent(event.id, "cal_perez"))?.status).toBe("scheduled");
+  });
+
+  it("does not confirm a pending booking from a low-confidence confirm intent", async () => {
+    const { repos, workflow } = buildContext(
+      new FakeInterpreter(
+        understanding({
+          intent: "confirm",
+          confidence: 0.1
+        })
+      )
+    );
+    repos.upsertPatient({ id: "pat_1", whatsappNumber: "+5491111111111", fullName: "Ana Gomez" });
+    repos.saveConversation({
+      id: "conv_1",
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      botPaused: false,
+      pendingBooking: {
+        serviceId: "svc_botox",
+        professionalId: "pro_perez",
+        startsAt: new Date("2026-06-01T13:00:00.000Z"),
+        endsAt: new Date("2026-06-01T13:30:00.000Z")
+      },
+      createdAt: new Date("2026-05-29T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-29T12:00:00.000Z")
+    });
+
+    const result = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "si"
+    });
+
+    expect(result).toEqual({
+      kind: "reply",
+      text: "No llegue a entenderlo con seguridad. Decime si queres reservar, confirmar, cancelar o cambiar un turno."
+    });
+    expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual(
+      expect.objectContaining({ serviceId: "svc_botox" })
+    );
+  });
+
+  it("does not treat medical safety text as patient data while waiting for a full name", async () => {
+    const { repos, workflow } = buildContext(
+      new FakeInterpreter(
+        understanding({
+          intent: "medical_safety",
+          confidence: 0.97,
+          requiresHuman: true,
+          safetyReason: "personalized_medical_advice"
+        })
+      )
+    );
+    repos.saveConversation({
+      id: "conv_1",
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      botPaused: false,
+      pendingBooking: {
+        serviceId: "svc_botox",
+        professionalId: "pro_perez",
+        startsAt: new Date("2026-06-01T13:00:00.000Z"),
+        endsAt: new Date("2026-06-01T13:30:00.000Z")
+      },
+      createdAt: new Date("2026-05-29T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-29T12:00:00.000Z")
+    });
+
+    const result = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Estoy embarazada"
+    });
+
+    expect(result).toEqual({
+      kind: "handoff",
+      text: "Te derivo con recepcion para que puedan ayudarte por este mismo chat."
+    });
+    expect(repos.getPatient("pat_1")?.fullName).toBeUndefined();
+    expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.botPaused).toBe(true);
+  });
+
+  it("does not offer a slot from a low-confidence booking intent with a service", async () => {
+    const { calendar, repos, workflow } = buildContext(
+      new FakeInterpreter(
+        understanding({
+          intent: "book",
+          confidence: 0.1,
+          serviceName: "Botox"
+        })
+      )
+    );
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
+    ]);
+
+    const result = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "botox"
+    });
+
+    expect(result).toEqual({
+      kind: "reply",
+      text: "No llegue a entenderlo con seguridad. Decime si queres reservar, confirmar, cancelar o cambiar un turno."
+    });
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toBeUndefined();
   });
 
   it("filters offered booking slots by AI professional preference", async () => {

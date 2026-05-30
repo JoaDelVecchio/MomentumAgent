@@ -3,12 +3,14 @@ import type { AuditLogPort } from "../../ports/audit-log.js";
 import { CalendarInfrastructureError } from "../../ports/calendar.js";
 import type { Conversation, OperationalRepository, PendingBooking } from "../../ports/repositories.js";
 import type { SchedulingService } from "../scheduling/scheduling-service.js";
-import { buildFaqResponse } from "./faq-response.js";
+import { buildFaqResponse, hasRequestedFaqTopic, missingConfiguredFaqResponse } from "./faq-response.js";
 import type { ConversationInterpreter, ConversationUnderstanding } from "./interpreter.js";
 import { normalizeText } from "./intent.js";
 import { RulesConversationInterpreter } from "./rules-interpreter.js";
 import { findProfessional, findService, formatServiceList } from "./service-matching.js";
 import { filterSlotsByDaypart, resolveSlotSearchRange } from "./time-preferences.js";
+
+const SIDE_EFFECT_CONFIDENCE_THRESHOLD = 0.7;
 
 type InboundMessage = {
   clinicId: string;
@@ -44,11 +46,6 @@ export class ConversationWorkflow {
       return { kind: "handoff", text: "Recepcion continua la conversacion por este mismo chat." };
     }
 
-    const pendingDataResult = await this.tryCompletePendingPatientData(input, conversation);
-    if (pendingDataResult) {
-      return pendingDataResult;
-    }
-
     const intent = await this.interpreter.interpret({
       clinicId: input.clinicId,
       conversationId: input.conversationId,
@@ -78,6 +75,18 @@ export class ConversationWorkflow {
       return await this.pauseForHandoff(input);
     }
 
+    const pendingDataResult = await this.tryCompletePendingPatientData(input, conversation, intent);
+    if (pendingDataResult) {
+      return pendingDataResult;
+    }
+
+    if (isLowConfidenceSideEffectIntent(intent)) {
+      return {
+        kind: "reply",
+        text: "No llegue a entenderlo con seguridad. Decime si queres reservar, confirmar, cancelar o cambiar un turno."
+      };
+    }
+
     if (intent.intent === "book") {
       return await this.handleBookingIntent(input, intent);
     }
@@ -100,6 +109,9 @@ export class ConversationWorkflow {
       const faq = buildFaqResponse(await this.repos.getClinicProfile(input.clinicId), intent);
       if (faq) {
         return { kind: "reply", text: faq };
+      }
+      if (hasRequestedFaqTopic(intent)) {
+        return { kind: "reply", text: missingConfiguredFaqResponse };
       }
     }
 
@@ -280,12 +292,20 @@ export class ConversationWorkflow {
     }
   }
 
-  private async tryCompletePendingPatientData(input: InboundMessage, conversation: Conversation) {
+  private async tryCompletePendingPatientData(
+    input: InboundMessage,
+    conversation: Conversation,
+    intent: ConversationUnderstanding
+  ) {
     if (!conversation.pendingBooking || conversation.pendingBooking.appointmentId) {
       return undefined;
     }
 
     if (!(await this.missingRequiredPatientFields(input.clinicId, input.patientId)).includes("fullName")) {
+      return undefined;
+    }
+
+    if (!canTreatMessageAsPatientData(intent)) {
       return undefined;
     }
 
@@ -391,6 +411,22 @@ export class ConversationWorkflow {
 function looksLikeFullName(text: string) {
   const normalized = normalizeFullName(text);
   return normalized ? normalized.split(" ").length >= 2 : false;
+}
+
+function canTreatMessageAsPatientData(intent: ConversationUnderstanding) {
+  return (intent.intent === "question" || intent.intent === "unknown") && !intent.requiresHuman;
+}
+
+function isLowConfidenceSideEffectIntent(intent: ConversationUnderstanding) {
+  if (intent.confidence >= SIDE_EFFECT_CONFIDENCE_THRESHOLD) {
+    return false;
+  }
+
+  if (intent.intent === "book") {
+    return Boolean(intent.serviceName);
+  }
+
+  return intent.intent === "confirm" || intent.intent === "cancel" || intent.intent === "reschedule";
 }
 
 function normalizeFullName(text: string) {

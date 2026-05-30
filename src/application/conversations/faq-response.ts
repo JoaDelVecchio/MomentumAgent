@@ -2,6 +2,9 @@ import type { ClinicProfile, Service } from "../../domain/types.js";
 import type { ConversationUnderstanding, RequestedTopic } from "./interpreter.js";
 import { findService } from "./service-matching.js";
 
+export const missingConfiguredFaqResponse =
+  "No tengo ese dato configurado para responderlo con seguridad. Te derivo con recepcion si queres confirmarlo.";
+
 export function buildFaqResponse(
   profile: ClinicProfile | undefined,
   understanding: ConversationUnderstanding
@@ -11,7 +14,7 @@ export function buildFaqResponse(
   }
 
   if (understanding.requestedTopics.includes("insurance") || understanding.requestedTopics.includes("payment")) {
-    return "No tengo ese dato configurado para responderlo con seguridad. Te derivo con recepcion si queres confirmarlo.";
+    return missingConfiguredFaqResponse;
   }
 
   const service = findService(profile, understanding.serviceName);
@@ -33,6 +36,10 @@ export function buildFaqResponse(
   }
 
   return `${service.name}: ${parts.join(" ")}`;
+}
+
+export function hasRequestedFaqTopic(understanding: ConversationUnderstanding) {
+  return understanding.requestedTopics.length > 0;
 }
 
 function hasAllRequestedServiceFacts(service: Service, topics: RequestedTopic[]) {
