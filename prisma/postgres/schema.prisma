@@ -1,4 +1,4 @@
-// Keep this schema in sync with prisma/postgres/schema.prisma.
+// Keep this schema in sync with prisma/schema.postgres.prisma.
 
 generator client {
   provider = "prisma-client-js"

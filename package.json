@@ -16,10 +16,10 @@
     "typecheck": "tsc --noEmit",
     "typecheck:web": "npm --workspace apps/web run typecheck",
     "prisma:generate": "prisma generate",
-    "prisma:generate:postgres": "DATABASE_URL=postgresql://momentum:momentum@localhost:5432/momentum prisma generate --schema prisma/schema.postgres.prisma",
-    "prisma:validate:postgres": "DATABASE_URL=postgresql://momentum:momentum@localhost:5432/momentum prisma validate --schema prisma/schema.postgres.prisma",
+    "prisma:generate:postgres": "DATABASE_URL=postgresql://momentum:momentum@localhost:5432/momentum prisma generate --schema prisma/postgres/schema.prisma",
+    "prisma:validate:postgres": "DATABASE_URL=postgresql://momentum:momentum@localhost:5432/momentum prisma validate --schema prisma/postgres/schema.prisma",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:migrate:deploy:postgres": "prisma migrate deploy --schema prisma/schema.postgres.prisma",
+    "prisma:migrate:deploy:postgres": "prisma migrate deploy --schema prisma/postgres/schema.prisma",
     "build:api:production": "npm run prisma:generate:postgres && npm run typecheck",
     "build:web:production": "npm --workspace apps/web run build",
     "build:production": "npm run build:api:production && npm run build:web:production"
