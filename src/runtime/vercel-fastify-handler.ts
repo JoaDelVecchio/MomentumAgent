@@ -19,6 +19,11 @@ export function createVercelFastifyHandler(runtimeFactory: VercelRuntimeFactory)
 }
 
 export function stripVercelApiPrefix(url: string | undefined): string | undefined {
+  const rewrittenPath = restoreExplicitHandlerRewrite(url);
+  if (rewrittenPath) {
+    return rewrittenPath;
+  }
+
   if (url === "/api") {
     return "/";
   }
@@ -29,4 +34,21 @@ export function stripVercelApiPrefix(url: string | undefined): string | undefine
     return url;
   }
   return url.slice("/api".length);
+}
+
+function restoreExplicitHandlerRewrite(url: string | undefined) {
+  if (!url) {
+    return undefined;
+  }
+
+  const parsed = new URL(url, "http://momentum.local");
+  const rewrittenPath = parsed.searchParams.get("__momentum_path");
+  if (!rewrittenPath) {
+    return undefined;
+  }
+
+  parsed.searchParams.delete("__momentum_path");
+  const pathname = rewrittenPath.startsWith("/") ? rewrittenPath : `/${rewrittenPath}`;
+  const query = parsed.searchParams.toString();
+  return query ? `${pathname}?${query}` : pathname;
 }

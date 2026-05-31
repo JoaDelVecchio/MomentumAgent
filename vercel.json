@@ -5,11 +5,11 @@
     }
   },
   "rewrites": [
-    { "source": "/health", "destination": "/api/health" },
-    { "source": "/leads", "destination": "/api/leads" },
-    { "source": "/internal/(.*)", "destination": "/api/internal/$1" },
-    { "source": "/integrations/(.*)", "destination": "/api/integrations/$1" },
-    { "source": "/webhooks/(.*)", "destination": "/api/webhooks/$1" }
+    { "source": "/health", "destination": "/api/handler?__momentum_path=/health" },
+    { "source": "/leads", "destination": "/api/handler?__momentum_path=/leads" },
+    { "source": "/internal/(.*)", "destination": "/api/handler?__momentum_path=/internal/$1" },
+    { "source": "/integrations/(.*)", "destination": "/api/handler?__momentum_path=/integrations/$1" },
+    { "source": "/webhooks/(.*)", "destination": "/api/handler?__momentum_path=/webhooks/$1" }
   ],
   "crons": [
     {

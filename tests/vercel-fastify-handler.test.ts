@@ -19,6 +19,16 @@ describe("Vercel Fastify handler", () => {
     expect(stripVercelApiPrefix(input)).toBe(expected);
   });
 
+  it("restores deep rewritten routes from the explicit Vercel handler path", () => {
+    expect(
+      stripVercelApiPrefix(
+        "/api/handler?__momentum_path=%2Finternal%2Fonboarding%2Fclinics%2Fclinic_1%2Fgoogle-calendar%2Fstatus&googleCalendar=connected"
+      )
+    ).toBe(
+      "/internal/onboarding/clinics/clinic_1/google-calendar/status?googleCalendar=connected"
+    );
+  });
+
   it("retries runtime initialization after a rejected factory call", async () => {
     const ready = vi.fn(async () => undefined);
     const emit = vi.fn();
