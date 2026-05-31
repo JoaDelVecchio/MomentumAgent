@@ -70,6 +70,21 @@ Start local API:
 ENABLE_SIMULATION_API=true npm run dev
 ```
 
+## Live Pilot Production
+
+The production pilot runbook lives at `docs/runbooks/live-pilot.md`.
+
+Production uses:
+
+- Vercel Functions for API/webhook routes;
+- Vercel Cron for outbound automation;
+- a separate Vercel web project rooted at `apps/web`;
+- managed Postgres for persistence;
+- Google Calendar as the calendar source of truth;
+- Kapso for WhatsApp transport.
+
+The API project must run with `MOMENTUM_RUNTIME_ENV=production`, `ENABLE_SIMULATION_API=false`, and a Postgres `DATABASE_URL`. The web project must set `MOMENTUM_API_BASE_URL` to the API production domain.
+
 ### AI conversation interpreter
 
 Momentum defaults to the deterministic rule-based interpreter:
