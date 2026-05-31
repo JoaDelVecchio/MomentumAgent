@@ -14,7 +14,7 @@
   "crons": [
     {
       "path": "/api/cron/outbound",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 12 * * *"
     }
   ]
 }

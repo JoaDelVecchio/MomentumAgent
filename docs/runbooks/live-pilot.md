@@ -51,7 +51,7 @@ Use `AI_INTERPRETER_PROVIDER=openai` only after the deterministic pilot smoke te
 
 ## Deploy
 
-The configured Vercel plan must support the selected cron frequency because this project uses sub-daily cron in `vercel.json`.
+The default `vercel.json` cron is Hobby-safe and runs once per day. For a real pilot that needs tighter reminder/reactivation timing, upgrade the Vercel project to Pro and change the cron schedule to `*/15 * * * *`.
 
 1. Provision Postgres from Vercel Marketplace.
 2. Set API project production env vars.
