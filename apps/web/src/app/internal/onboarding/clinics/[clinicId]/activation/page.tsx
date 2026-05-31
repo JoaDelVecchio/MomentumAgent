@@ -190,7 +190,8 @@ async function postLifecycle(path: string, token: string): Promise<ClinicSetupRe
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: "POST",
     cache: "no-store",
-    headers: adminHeaders(token)
+    headers: adminHeaders(token),
+    body: JSON.stringify({})
   });
   const body = (await response.json()) as ClinicSetupResponse | ActivationErrorResponse;
 

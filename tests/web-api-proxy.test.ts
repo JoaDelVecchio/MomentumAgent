@@ -1,14 +1,18 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { readFile } from "node:fs/promises";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { POST } from "../apps/web/src/app/api/backend/[...path]/route.js";
+import { adminHeaders, apiJson } from "../apps/web/src/lib/api.js";
 
 const originalMomentumApiBaseUrl = process.env.MOMENTUM_API_BASE_URL;
 const originalNextPublicApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   restoreEnv("MOMENTUM_API_BASE_URL", originalMomentumApiBaseUrl);
   restoreEnv("NEXT_PUBLIC_API_BASE_URL", originalNextPublicApiBaseUrl);
+  globalThis.fetch = originalFetch;
+  vi.restoreAllMocks();
 });
 
 describe("web API proxy", () => {
@@ -90,6 +94,29 @@ describe("web API proxy", () => {
       ignoredHeader: undefined,
       body: "{}"
     });
+  });
+
+  it("sends an empty JSON body for Google calendar start requests without a payload", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth" }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await apiJson("/internal/onboarding/clinics/clinic_1/google-calendar/start", {
+      method: "POST",
+      headers: adminHeaders("secret")
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/backend/internal/onboarding/clinics/clinic_1/google-calendar/start",
+      expect.objectContaining({
+        method: "POST",
+        body: "{}"
+      })
+    );
   });
 
   it("rejects dot-segment proxy paths before they can escape the backend base path", async () => {
