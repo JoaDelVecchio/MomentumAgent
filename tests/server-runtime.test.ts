@@ -216,6 +216,16 @@ describe("server startup runtime decisions", () => {
     ).toBe(true);
   });
 
+  it("requires onboarding runtime when Kapso is enabled even without outbound automation", () => {
+    expect(
+      needsOnboardingRuntime({
+        adminEnabled: false,
+        whatsappProvider: "kapso",
+        outboundAutomationEnabled: false
+      })
+    ).toBe(true);
+  });
+
   it("does not require onboarding runtime when only outbound token is configured without WhatsApp runtime", () => {
     expect(
       needsOnboardingRuntime({
