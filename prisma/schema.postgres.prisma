@@ -1,0 +1,318 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Clinic {
+  id                        String                @id
+  name                      String
+  timezone                  String
+  minimumNoticeMinutes      Int
+  cancellationNoticeMinutes Int
+  bufferMinutes             Int
+  requiredPatientFieldsJson String
+  leadId                    String?
+  lead                      ClinicLead?           @relation("ClinicSetupLead", fields: [leadId], references: [id], onDelete: SetNull)
+  source                    String                @default("presencial")
+  lifecycleState            String                @default("setup")
+  paymentStatus             String                @default("unpaid")
+  primaryContactName        String                @default("")
+  primaryContactPhone       String                @default("")
+  city                      String                @default("")
+  country                   String                @default("Argentina")
+  whatsappReady             Boolean               @default(false)
+  calendarConnected         Boolean               @default(false)
+  testConversationPassed    Boolean               @default(false)
+  activationChecklistCompleted Boolean             @default(false)
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+  services                  Service[]
+  professionals             Professional[]
+  serviceProfessionals      ServiceProfessional[]
+  appointments              Appointment[]
+  conversations             Conversation[]
+  patientInterests          PatientInterest[]
+  auditEvents               AuditEvent[]
+  reactivationAttempts      ReactivationAttempt[]
+  calendarConnections       CalendarConnection[]
+  processedWebhookDeliveries ProcessedWebhookDelivery[]
+  outboundDeliveries        OutboundDelivery[]
+  knowledgeRecords          ClinicKnowledge[]
+  convertedLeads            ClinicLead[]          @relation("ConvertedClinic")
+
+  @@index([lifecycleState, paymentStatus, updatedAt])
+  @@index([source, updatedAt])
+  @@index([leadId])
+}
+
+model ClinicLead {
+  id                       String   @id
+  contactName              String
+  clinicName               String
+  whatsappOrPhone          String
+  city                     String
+  country                  String
+  professionalCount        Int
+  currentSchedulingSystem  String
+  monthlyWhatsappInquiries String
+  mainPain                 String
+  source                   String
+  status                   String
+  convertedClinicId        String?
+  submittedAt              DateTime
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  convertedClinic          Clinic?  @relation("ConvertedClinic", fields: [convertedClinicId], references: [id], onDelete: SetNull)
+  setupClinics             Clinic[] @relation("ClinicSetupLead")
+
+  @@index([submittedAt])
+  @@index([status, submittedAt])
+  @@index([source, submittedAt])
+  @@index([convertedClinicId])
+}
+
+model ClinicKnowledge {
+  id        String   @id
+  clinicId  String
+  category  String
+  question  String
+  answer    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  clinic    Clinic   @relation(fields: [clinicId], references: [id])
+
+  @@index([clinicId, category, question])
+}
+
+model Service {
+  id                   String
+  clinicId             String
+  name                 String
+  durationMinutes      Int
+  priceText            String
+  preparation          String
+  restrictionsJson     String
+  clinic               Clinic                @relation(fields: [clinicId], references: [id])
+  serviceProfessionals ServiceProfessional[]
+  appointments         Appointment[]
+  patientInterests     PatientInterest[]
+
+  @@id([clinicId, id])
+  @@index([clinicId])
+}
+
+model Professional {
+  id                   String
+  clinicId             String
+  name                 String
+  calendarId           String
+  workingHoursJson     String                @default("[]")
+  clinic               Clinic                @relation(fields: [clinicId], references: [id])
+  serviceProfessionals ServiceProfessional[]
+  appointments         Appointment[]
+  patientInterests     PatientInterest[]
+
+  @@id([clinicId, id])
+  @@unique([clinicId, calendarId])
+  @@index([clinicId])
+}
+
+model ServiceProfessional {
+  clinicId       String
+  serviceId      String
+  professionalId String
+  clinic         Clinic       @relation(fields: [clinicId], references: [id])
+  service        Service      @relation(fields: [clinicId, serviceId], references: [clinicId, id])
+  professional   Professional @relation(fields: [clinicId, professionalId], references: [clinicId, id])
+
+  @@id([clinicId, serviceId, professionalId])
+  @@index([professionalId])
+}
+
+model Patient {
+  id             String            @id
+  whatsappNumber String            @unique
+  fullName       String?
+  optedOut       Boolean           @default(false)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  appointments   Appointment[]
+  conversations  Conversation[]
+  interests      PatientInterest[]
+}
+
+model WhatsAppOptOut {
+  whatsappNumber String   @id
+  createdAt      DateTime @default(now())
+}
+
+model Appointment {
+  id              String             @id
+  clinicId        String
+  patientId       String
+  serviceId       String
+  professionalId  String
+  calendarEventId String
+  calendarId      String
+  startsAt        DateTime
+  endsAt          DateTime
+  status          String
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  clinic          Clinic             @relation(fields: [clinicId], references: [id])
+  patient         Patient            @relation(fields: [patientId], references: [id])
+  service         Service            @relation(fields: [clinicId, serviceId], references: [clinicId, id])
+  professional    Professional       @relation(fields: [clinicId, professionalId], references: [clinicId, id])
+  reminders       ReminderDelivery[]
+
+  @@unique([calendarEventId])
+  @@index([clinicId, startsAt])
+  @@index([patientId, status])
+  @@index([serviceId])
+  @@index([professionalId, startsAt])
+}
+
+model Conversation {
+  id                 String
+  clinicId           String
+  patientId          String
+  botPaused          Boolean      @default(false)
+  pendingBookingJson String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  clinic             Clinic       @relation(fields: [clinicId], references: [id])
+  patient            Patient      @relation(fields: [patientId], references: [id])
+
+  @@id([clinicId, id])
+  @@index([clinicId, updatedAt])
+  @@index([patientId])
+  @@index([id])
+}
+
+model PatientInterest {
+  id             String        @id
+  clinicId       String
+  patientId      String
+  serviceId      String
+  professionalId String?
+  preferredFrom  DateTime
+  preferredTo    DateTime
+  status         String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  clinic         Clinic        @relation(fields: [clinicId], references: [id])
+  patient        Patient       @relation(fields: [patientId], references: [id])
+  service        Service       @relation(fields: [clinicId, serviceId], references: [clinicId, id])
+  professional   Professional? @relation(fields: [clinicId, professionalId], references: [clinicId, id])
+
+  @@index([clinicId, status, preferredFrom])
+  @@index([patientId, status])
+  @@index([serviceId, status])
+  @@index([professionalId, status])
+}
+
+model AuditEvent {
+  id             String        @id
+  clinicId       String
+  conversationId String?
+  type           String
+  message        String
+  metadataJson   String
+  createdAt      DateTime      @default(now())
+  clinic         Clinic        @relation(fields: [clinicId], references: [id])
+
+  @@index([clinicId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([type, createdAt])
+}
+
+model ReminderDelivery {
+  id            String      @id
+  appointmentId String
+  kind          String
+  sentAt        DateTime
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+
+  @@unique([appointmentId, kind])
+  @@index([sentAt])
+}
+
+model ReactivationAttempt {
+  id             String   @id
+  clinicId       String
+  whatsappNumber String
+  attemptNumber  Int
+  sentAt         DateTime
+  outcome        String?
+  clinic         Clinic   @relation(fields: [clinicId], references: [id])
+
+  @@index([clinicId, whatsappNumber, sentAt])
+}
+
+model CalendarConnection {
+  id                    String   @id @default(cuid())
+  clinicId              String
+  provider              String
+  providerAccountEmail  String?
+  scopesJson            String
+  encryptedAccessToken  String?
+  encryptedRefreshToken String
+  expiryDate            DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  clinic                Clinic   @relation(fields: [clinicId], references: [id])
+
+  @@unique([clinicId, provider])
+  @@index([provider])
+}
+
+model ProcessedWebhookDelivery {
+  id                String   @id @default(cuid())
+  provider          String
+  idempotencyKey    String
+  clinicId          String
+  conversationId    String?
+  providerMessageId String?
+  status            String   @default("processed")
+  responseText      String?
+  workflowResult    String?
+  outboundProviderMessageId String?
+  processedAt       DateTime @default(now())
+  clinic            Clinic   @relation(fields: [clinicId], references: [id])
+
+  @@unique([provider, idempotencyKey])
+  @@index([clinicId, processedAt])
+}
+
+model OutboundDelivery {
+  id                String   @id
+  clinicId          String
+  deliveryKey       String   @unique
+  automationType    String
+  status            String
+  toWhatsappNumber  String
+  patientId         String?
+  conversationId    String?
+  appointmentId     String?
+  templateName      String
+  metadataJson      String
+  providerMessageId String?
+  failureReason     String?
+  claimedAt         DateTime
+  sentAt            DateTime?
+  blockedAt         DateTime?
+  failedAt          DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  clinic            Clinic   @relation(fields: [clinicId], references: [id])
+
+  @@index([clinicId, automationType, status])
+  @@index([patientId])
+  @@index([conversationId])
+  @@index([appointmentId])
+  @@index([toWhatsappNumber])
+}
