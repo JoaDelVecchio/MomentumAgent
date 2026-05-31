@@ -1,0 +1,1 @@
+Keep this directory so Vercel's "Other" framework preset has a static output directory while API routes are served from `api/`.
