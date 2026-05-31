@@ -5,6 +5,10 @@ import type { ClinicActivationGuard } from "../ports/activation.js";
 import type { CalendarPort } from "../ports/calendar.js";
 import type { LoggerPort } from "../ports/logger.js";
 import {
+  registerConversationControlRoutes,
+  type ConversationControlRoutesOptions
+} from "./conversation-control-routes.js";
+import {
   registerGoogleCalendarOnboardingRoutes,
   type GoogleCalendarOnboardingRoutesOptions
 } from "./google-calendar-onboarding-routes.js";
@@ -31,6 +35,7 @@ type BuildAppOptions = {
   outboundAutomation?: OutboundAutomationRoutesOptions;
   onboarding?: OnboardingRoutesOptions;
   googleCalendarOnboarding?: GoogleCalendarOnboardingRoutesOptions;
+  conversationControl?: ConversationControlRoutesOptions;
   clinicActivation?: ClinicActivationGuard;
   logger?: LoggerPort;
 };
@@ -82,6 +87,10 @@ export function buildApp(options: BuildAppOptions = {}) {
 
   if (options.googleCalendarOnboarding) {
     registerGoogleCalendarOnboardingRoutes(app, options.googleCalendarOnboarding);
+  }
+
+  if (options.conversationControl) {
+    registerConversationControlRoutes(app, options.conversationControl);
   }
 
   return app;

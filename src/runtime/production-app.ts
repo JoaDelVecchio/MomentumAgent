@@ -2,9 +2,11 @@ import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
 import { ConsoleLogger } from "../adapters/console-logger.js";
+import { PrismaAuditLog } from "../adapters/prisma/audit-log.js";
 import { PrismaOnboardingRepository } from "../adapters/prisma/onboarding-repository.js";
 import { PrismaOperationalRepository } from "../adapters/prisma/operational-repository.js";
 import { buildApp } from "../api/app.js";
+import { ConversationControlService } from "../application/conversations/conversation-control-service.js";
 import { GoogleCalendarOnboardingService } from "../application/onboarding/google-calendar-onboarding-service.js";
 import { OnboardingService } from "../application/onboarding/onboarding-service.js";
 import { readAdminConfig } from "../config/admin.js";
@@ -101,6 +103,13 @@ export async function createProductionAppRuntime(
             calendarClientFactory: googleRuntime.createCalendarClient
           })
         : undefined;
+    const conversationControl =
+      adminConfig.enabled && sharedPrisma
+        ? new ConversationControlService({
+            repos: new PrismaOperationalRepository(sharedPrisma),
+            audit: new PrismaAuditLog(sharedPrisma)
+          })
+        : undefined;
     const clinicActivation = onboardingService
       ? { isClinicActive: (clinicId: string) => onboardingService.isClinicActive(clinicId) }
       : undefined;
@@ -136,6 +145,10 @@ export async function createProductionAppRuntime(
       googleCalendarOnboarding:
         adminConfig.enabled && googleCalendarOnboardingService
           ? { adminToken: adminConfig.token, service: googleCalendarOnboardingService }
+          : undefined,
+      conversationControl:
+        adminConfig.enabled && conversationControl
+          ? { adminToken: adminConfig.token, service: conversationControl }
           : undefined
     });
     const runtimeApp = app;
