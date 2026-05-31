@@ -1,0 +1,20 @@
+{
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 300
+    }
+  },
+  "rewrites": [
+    { "source": "/health", "destination": "/api/health" },
+    { "source": "/leads", "destination": "/api/leads" },
+    { "source": "/internal/(.*)", "destination": "/api/internal/$1" },
+    { "source": "/integrations/(.*)", "destination": "/api/integrations/$1" },
+    { "source": "/webhooks/(.*)", "destination": "/api/webhooks/$1" }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/outbound",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}
