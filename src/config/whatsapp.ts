@@ -1,3 +1,5 @@
+import { optionalEnv, requiredEnv } from "./env.js";
+
 export type WhatsAppConfig =
   | {
       provider: "disabled";
@@ -12,7 +14,7 @@ export type WhatsAppConfig =
     };
 
 export function readWhatsAppConfig(env: NodeJS.ProcessEnv): WhatsAppConfig {
-  const provider = env.WHATSAPP_PROVIDER;
+  const provider = optionalEnv(env.WHATSAPP_PROVIDER);
   if (!provider) {
     return { provider: "disabled" };
   }
@@ -22,18 +24,18 @@ export function readWhatsAppConfig(env: NodeJS.ProcessEnv): WhatsAppConfig {
 
   return {
     provider: "kapso",
-    apiKey: requireEnv(env, "KAPSO_API_KEY"),
-    webhookSecret: requireEnv(env, "KAPSO_WEBHOOK_SECRET"),
-    phoneNumberId: requireEnv(env, "KAPSO_PHONE_NUMBER_ID"),
-    businessAccountId: env.KAPSO_BUSINESS_ACCOUNT_ID,
-    publicWebhookUrl: env.MOMENTUM_PUBLIC_WEBHOOK_URL
+    apiKey: requiredEnv(env, "KAPSO_API_KEY", "KAPSO_API_KEY is required when WHATSAPP_PROVIDER=kapso"),
+    webhookSecret: requiredEnv(
+      env,
+      "KAPSO_WEBHOOK_SECRET",
+      "KAPSO_WEBHOOK_SECRET is required when WHATSAPP_PROVIDER=kapso"
+    ),
+    phoneNumberId: requiredEnv(
+      env,
+      "KAPSO_PHONE_NUMBER_ID",
+      "KAPSO_PHONE_NUMBER_ID is required when WHATSAPP_PROVIDER=kapso"
+    ),
+    businessAccountId: optionalEnv(env.KAPSO_BUSINESS_ACCOUNT_ID),
+    publicWebhookUrl: optionalEnv(env.MOMENTUM_PUBLIC_WEBHOOK_URL)
   };
-}
-
-function requireEnv(env: NodeJS.ProcessEnv, key: string) {
-  const value = env[key];
-  if (!value) {
-    throw new Error(`${key} is required when WHATSAPP_PROVIDER=kapso`);
-  }
-  return value;
 }

@@ -1,5 +1,6 @@
 import type { CalendarProvider } from "../dev/seed.js";
 import type { WhatsAppConfig } from "./whatsapp.js";
+import { optionalEnv } from "./env.js";
 
 export type RuntimeMode = "development" | "production";
 
@@ -27,7 +28,7 @@ export type RuntimeSummary = {
 
 export function readRuntimeMode(env: NodeJS.ProcessEnv = process.env): RuntimeMode {
   if (
-    env.MOMENTUM_RUNTIME_ENV === "production" ||
+    optionalEnv(env.MOMENTUM_RUNTIME_ENV) === "production" ||
     env.VERCEL_ENV === "production" ||
     env.NODE_ENV === "production"
   ) {

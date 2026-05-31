@@ -1,3 +1,5 @@
+import { optionalEnv, requiredEnv } from "./env.js";
+
 export const GOOGLE_CALENDAR_SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/calendar.events.freebusy",
@@ -16,10 +18,10 @@ export type GoogleCalendarConfig = {
 export function readGoogleCalendarConfig(
   env: NodeJS.ProcessEnv = process.env
 ): GoogleCalendarConfig {
-  const clientId = readRequiredEnv(env, "GOOGLE_CALENDAR_CLIENT_ID");
-  const clientSecret = readRequiredEnv(env, "GOOGLE_CALENDAR_CLIENT_SECRET");
-  const redirectUri = readRequiredEnv(env, "GOOGLE_CALENDAR_REDIRECT_URI");
-  const setupToken = readRequiredEnv(env, "GOOGLE_CALENDAR_SETUP_TOKEN");
+  const clientId = requiredEnv(env, "GOOGLE_CALENDAR_CLIENT_ID");
+  const clientSecret = requiredEnv(env, "GOOGLE_CALENDAR_CLIENT_SECRET");
+  const redirectUri = requiredEnv(env, "GOOGLE_CALENDAR_REDIRECT_URI");
+  const setupToken = requiredEnv(env, "GOOGLE_CALENDAR_SETUP_TOKEN");
 
   try {
     new URL(redirectUri);
@@ -31,16 +33,8 @@ export function readGoogleCalendarConfig(
     clientId,
     clientSecret,
     redirectUri,
-    stateSecret: env.GOOGLE_CALENDAR_OAUTH_STATE_SECRET?.trim() || clientSecret,
+    stateSecret: optionalEnv(env.GOOGLE_CALENDAR_OAUTH_STATE_SECRET) ?? clientSecret,
     setupToken,
     scopes: [...GOOGLE_CALENDAR_SCOPES]
   };
-}
-
-function readRequiredEnv(env: NodeJS.ProcessEnv, key: string) {
-  const value = env[key]?.trim();
-  if (!value) {
-    throw new Error(`${key} is required`);
-  }
-  return value;
 }

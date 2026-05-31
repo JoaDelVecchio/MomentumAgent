@@ -76,4 +76,32 @@ describe("production app runtime", () => {
 
     await runtime.close();
   });
+
+  it("ignores quoted blank Vercel env placeholders before reading production config", async () => {
+    const env = {
+      ...process.env,
+      DATABASE_URL: '""',
+      STORAGE_DATABASE_URL: "postgresql://user:pass@db.example.com:5432/momentum",
+      CALENDAR_PROVIDER: '""',
+      WHATSAPP_PROVIDER: '""',
+      MOMENTUM_ADMIN_TOKEN: '""',
+      OUTBOUND_AUTOMATION_TOKEN: '""',
+      ENABLE_SIMULATION_API: "false",
+      MOMENTUM_RUNTIME_ENV: "production"
+    };
+
+    const runtime = await createProductionAppRuntime(env);
+
+    expect(env.DATABASE_URL).toBe("postgresql://user:pass@db.example.com:5432/momentum");
+    expect(runtime.summary).toMatchObject({
+      runtimeMode: "production",
+      database: "postgres",
+      calendarProvider: "fake",
+      whatsappProvider: "disabled",
+      adminRoutes: "disabled",
+      outboundAutomation: "disabled"
+    });
+
+    await runtime.close();
+  });
 });

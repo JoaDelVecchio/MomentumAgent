@@ -10,6 +10,7 @@ import { ConversationControlService } from "../application/conversations/convers
 import { GoogleCalendarOnboardingService } from "../application/onboarding/google-calendar-onboarding-service.js";
 import { OnboardingService } from "../application/onboarding/onboarding-service.js";
 import { readAdminConfig } from "../config/admin.js";
+import { optionalEnv } from "../config/env.js";
 import { readOutboundConfig } from "../config/outbound.js";
 import {
   assertRuntimeSafety,
@@ -194,13 +195,14 @@ function requireOnboardingPrisma(
 }
 
 function readCalendarProvider(provider: string | undefined): CalendarProvider {
-  if (!provider || provider === "fake") {
+  const normalizedProvider = optionalEnv(provider);
+  if (!normalizedProvider || normalizedProvider === "fake") {
     return "fake";
   }
-  if (provider === "google") {
+  if (normalizedProvider === "google") {
     return "google";
   }
-  throw new Error(`Unsupported CALENDAR_PROVIDER: ${provider}`);
+  throw new Error(`Unsupported CALENDAR_PROVIDER: ${normalizedProvider}`);
 }
 
 function readDatabaseUrl(env: NodeJS.ProcessEnv) {
@@ -213,6 +215,5 @@ function readDatabaseUrl(env: NodeJS.ProcessEnv) {
 }
 
 function firstPresent(value: string | undefined) {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
+  return optionalEnv(value);
 }
