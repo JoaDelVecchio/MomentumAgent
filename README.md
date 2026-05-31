@@ -128,21 +128,34 @@ GOOGLE_CALENDAR_SETUP_TOKEN="local-setup-token"
 TOKEN_ENCRYPTION_KEY="<32-byte base64 or 64-char hex key>"
 ```
 
-4. Start the API and open:
+4. Start the API with admin onboarding enabled:
 
-```text
-http://127.0.0.1:3000/integrations/google-calendar/start?clinicId=clinic_1&setupToken=local-setup-token
+```bash
+CALENDAR_PROVIDER=google MOMENTUM_ADMIN_TOKEN="local-admin-token" ENABLE_SIMULATION_API=true npm run dev:api
 ```
 
-5. Complete Google consent. Momentum stores encrypted OAuth credentials in Prisma.
-6. Set the seeded professional `calendarId` in `src/dev/seed.ts` to the real Google calendar id you want to test.
-7. Use `/simulate/inbound-message` to request, confirm, reschedule, or cancel a booking.
-8. Verify the event appears, moves, or disappears in Google Calendar.
+5. Start the web app:
+
+```bash
+NEXT_PUBLIC_API_BASE_URL="http://127.0.0.1:3000" npm run dev:web
+```
+
+6. Open the private onboarding flow:
+
+```text
+http://127.0.0.1:3001/internal/onboarding
+```
+
+7. Enter `local-admin-token`, open the clinic setup page, and use the Google Calendar panel to connect Google and map each professional to a writable calendar.
+8. Save the clinic profile.
+9. Use test mode or `/simulate/inbound-message` to request, confirm, reschedule, or cancel a booking.
+10. Verify the event appears, moves, or disappears in the mapped Google Calendar.
 
 Required calendar scopes:
 
 - `https://www.googleapis.com/auth/calendar.events`
 - `https://www.googleapis.com/auth/calendar.events.freebusy`
+- `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
 
 ## Kapso WhatsApp Local Setup
 
