@@ -206,14 +206,20 @@ function readCalendarProvider(provider: string | undefined): CalendarProvider {
 }
 
 function readDatabaseUrl(env: NodeJS.ProcessEnv) {
-  return (
-    firstPresent(env.DATABASE_URL) ??
-    firstPresent(env.STORAGE_DATABASE_URL) ??
-    firstPresent(env.STORAGE_POSTGRES_PRISMA_URL) ??
+  const candidates = [
+    firstPresent(env.DATABASE_URL),
+    firstPresent(env.STORAGE_DATABASE_URL),
+    firstPresent(env.STORAGE_POSTGRES_PRISMA_URL),
     firstPresent(env.STORAGE_POSTGRES_URL)
-  );
+  ].filter((value): value is string => Boolean(value));
+
+  return candidates.find(isPostgresUrl) ?? candidates[0];
 }
 
 function firstPresent(value: string | undefined) {
   return optionalEnv(value);
+}
+
+function isPostgresUrl(value: string) {
+  return value.startsWith("postgresql://") || value.startsWith("postgres://");
 }

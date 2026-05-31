@@ -104,4 +104,28 @@ describe("production app runtime", () => {
 
     await runtime.close();
   });
+
+  it("prefers Vercel Storage Postgres URLs over a local SQLite DATABASE_URL in production", async () => {
+    const env = {
+      ...process.env,
+      DATABASE_URL: "file:./dev.db",
+      STORAGE_POSTGRES_PRISMA_URL: "postgresql://user:pass@db.example.com:5432/momentum",
+      CALENDAR_PROVIDER: "fake",
+      WHATSAPP_PROVIDER: "",
+      MOMENTUM_ADMIN_TOKEN: "",
+      OUTBOUND_AUTOMATION_TOKEN: "",
+      ENABLE_SIMULATION_API: "false",
+      MOMENTUM_RUNTIME_ENV: "production"
+    };
+
+    const runtime = await createProductionAppRuntime(env);
+
+    expect(env.DATABASE_URL).toBe("postgresql://user:pass@db.example.com:5432/momentum");
+    expect(runtime.summary).toMatchObject({
+      runtimeMode: "production",
+      database: "postgres"
+    });
+
+    await runtime.close();
+  });
 });
