@@ -4,17 +4,30 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { apiJson, adminHeaders } from "../../../../../lib/api";
-import type { ClinicPaymentStatus, ClinicSetupRecord, ClinicSetupResponse } from "../../../../../lib/types";
+import type {
+  ClinicPaymentStatus,
+  ClinicSetupRecord,
+  ClinicSetupResponse,
+  GoogleCalendarConnectionStatus,
+  GoogleCalendarListResponse,
+  GoogleCalendarStartResponse,
+  GoogleCalendarStatusResponse,
+  GoogleCalendarSummary
+} from "../../../../../lib/types";
 
 const readinessLabels: Array<{ key: keyof Pick<
   ClinicSetupRecord,
-  "whatsappReady" | "calendarConnected" | "testConversationPassed" | "activationChecklistCompleted"
+  "whatsappReady" | "testConversationPassed" | "activationChecklistCompleted"
 >; label: string }> = [
   { key: "whatsappReady", label: "WhatsApp ready" },
-  { key: "calendarConnected", label: "Calendar connected" },
   { key: "testConversationPassed", label: "Test conversation passed" },
   { key: "activationChecklistCompleted", label: "Activation checklist completed" }
 ];
+
+type EditableClinicProfile = {
+  professionals?: Array<{ id: string; name: string; calendarId?: string }>;
+  services?: Array<{ id: string; name: string; professionalIds: string[] }>;
+};
 
 const initialClinicProfileJson = JSON.stringify(
   {
@@ -51,6 +64,8 @@ export default function ClinicSetupPage() {
   const clinicId = params.clinicId;
   const [token, setToken] = useState("");
   const [setup, setSetup] = useState<ClinicSetupRecord | null>(null);
+  const [googleStatus, setGoogleStatus] = useState<GoogleCalendarConnectionStatus | null>(null);
+  const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendarSummary[]>([]);
   const [status, setStatus] = useState("Enter an admin token, then load this clinic setup.");
   const [isBusy, setIsBusy] = useState(false);
   const [localKnowledge, setLocalKnowledge] = useState(
@@ -67,6 +82,11 @@ export default function ClinicSetupPage() {
         headers: adminHeaders(token)
       });
       setSetup(response.setup);
+      try {
+        await loadGoogleCalendarStatus();
+      } catch {
+        setGoogleStatus(null);
+      }
       setStatus("Clinic setup loaded.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to load clinic setup.");
@@ -113,6 +133,46 @@ export default function ClinicSetupPage() {
     }
   }
 
+  async function loadGoogleCalendarStatus() {
+    const response = await apiJson<GoogleCalendarStatusResponse>(
+      `/internal/onboarding/clinics/${clinicId}/google-calendar/status`,
+      { headers: adminHeaders(token) }
+    );
+    setGoogleStatus(response.status);
+  }
+
+  async function connectGoogleCalendar() {
+    setIsBusy(true);
+    setStatus("Starting Google Calendar connection...");
+    try {
+      const response = await apiJson<GoogleCalendarStartResponse>(
+        `/internal/onboarding/clinics/${clinicId}/google-calendar/start`,
+        { method: "POST", headers: adminHeaders(token) }
+      );
+      window.location.assign(response.authorizationUrl);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to start Google Calendar connection.");
+      setIsBusy(false);
+    }
+  }
+
+  async function loadGoogleCalendars() {
+    setIsBusy(true);
+    setStatus("Loading Google calendars...");
+    try {
+      const response = await apiJson<GoogleCalendarListResponse>(
+        `/internal/onboarding/clinics/${clinicId}/google-calendar/calendars`,
+        { headers: adminHeaders(token) }
+      );
+      setGoogleCalendars(response.calendars);
+      setStatus("Google calendars loaded.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to load Google calendars.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   async function saveProfile() {
     let payload: unknown;
     try {
@@ -141,6 +201,13 @@ export default function ClinicSetupPage() {
       setIsBusy(false);
     }
   }
+
+  const parsedProfile = parseEditableProfile(profileJson);
+  const mappedCalendarIds = new Set(
+    (parsedProfile?.professionals ?? [])
+      .map((professional) => professional.calendarId ?? "")
+      .filter(Boolean)
+  );
 
   return (
     <main className="internal-shell">
@@ -256,6 +323,55 @@ export default function ClinicSetupPage() {
 
         <div className="internal-panel internal-form">
           <div className="internal-panel-heading">
+            <h2>Google Calendar</h2>
+            {googleStatus ? <span>{googleStatus.connected ? "connected" : "not connected"}</span> : null}
+          </div>
+          <div className="internal-actions">
+            <button className="primary-link" disabled={isBusy || !token} onClick={connectGoogleCalendar} type="button">
+              {googleStatus?.connected ? "Reconnect Google Calendar" : "Connect Google Calendar"}
+            </button>
+            <button
+              className="secondary-link button-like"
+              disabled={isBusy || !token || !googleStatus?.connected || googleStatus.reconnectRequired}
+              onClick={loadGoogleCalendars}
+              type="button"
+            >
+              Refresh calendars
+            </button>
+          </div>
+          {googleStatus?.reconnectRequired ? (
+            <p className="internal-empty">Reconnect Google Calendar to grant the required calendar-list permission.</p>
+          ) : null}
+          <div className="calendar-map">
+            {(parsedProfile?.professionals ?? []).map((professional) => (
+              <label key={professional.id}>
+                {professional.name}
+                <select
+                  value={professional.calendarId ?? ""}
+                  onChange={(event) =>
+                    setProfileJson(updateProfessionalCalendarId(profileJson, professional.id, event.target.value))
+                  }
+                >
+                  <option value="">Select calendar</option>
+                  {googleCalendars.map((calendar) => (
+                    <option
+                      disabled={
+                        !calendar.bookable || (calendar.id !== professional.calendarId && mappedCalendarIds.has(calendar.id))
+                      }
+                      key={calendar.id}
+                      value={calendar.id}
+                    >
+                      {calendar.summary} - {calendar.accessRole}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="internal-panel internal-form">
+          <div className="internal-panel-heading">
             <h2>Clinic profile JSON</h2>
           </div>
           <label>
@@ -295,4 +411,27 @@ export default function ClinicSetupPage() {
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function parseEditableProfile(value: string): EditableClinicProfile | undefined {
+  try {
+    const parsed = JSON.parse(value) as EditableClinicProfile;
+    return parsed && typeof parsed === "object" ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function updateProfessionalCalendarId(profileJson: string, professionalId: string, calendarId: string): string {
+  const parsed = JSON.parse(profileJson) as EditableClinicProfile;
+  return JSON.stringify(
+    {
+      ...parsed,
+      professionals: (parsed.professionals ?? []).map((professional) =>
+        professional.id === professionalId ? { ...professional, calendarId } : professional
+      )
+    },
+    null,
+    2
+  );
 }

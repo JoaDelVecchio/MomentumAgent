@@ -106,3 +106,33 @@ export type TestMessageResponse = {
     [key: string]: unknown;
   };
 };
+
+export type GoogleCalendarConnectionStatus = {
+  provider: "google";
+  connected: boolean;
+  reconnectRequired: boolean;
+  requiredScopes: string[];
+  grantedScopes: string[];
+  missingScopes: string[];
+};
+
+export type GoogleCalendarStatusResponse = {
+  status: GoogleCalendarConnectionStatus;
+};
+
+export type GoogleCalendarStartResponse = {
+  authorizationUrl: string;
+};
+
+export type GoogleCalendarSummary = {
+  id: string;
+  summary: string;
+  primary: boolean;
+  accessRole: string;
+  timeZone?: string;
+  bookable: boolean;
+};
+
+export type GoogleCalendarListResponse = {
+  calendars: GoogleCalendarSummary[];
+};

@@ -53,6 +53,45 @@ describe("web API proxy", () => {
     });
   });
 
+  it("proxies Google calendar onboarding start responses", async () => {
+    const observed = await withBackendServer(async (baseUrl, requests) => {
+      process.env.MOMENTUM_API_BASE_URL = baseUrl;
+      delete process.env.NEXT_PUBLIC_API_BASE_URL;
+
+      const response = await POST(
+        new Request(
+          "http://127.0.0.1:3001/api/backend/internal/onboarding/clinics/clinic_1/google-calendar/start",
+          {
+            method: "POST",
+            headers: {
+              authorization: "Bearer secret",
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({})
+          }
+        ),
+        {
+          params: Promise.resolve({
+            path: ["internal", "onboarding", "clinics", "clinic_1", "google-calendar", "start"]
+          })
+        }
+      );
+
+      expect(response.status).toBe(201);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      return requests[0];
+    });
+
+    expect(observed).toEqual({
+      method: "POST",
+      url: "/internal/onboarding/clinics/clinic_1/google-calendar/start",
+      authorization: "Bearer secret",
+      contentType: "application/json",
+      ignoredHeader: undefined,
+      body: "{}"
+    });
+  });
+
   it("rejects dot-segment proxy paths before they can escape the backend base path", async () => {
     const observed = await withBackendServer(async (baseUrl, requests) => {
       process.env.MOMENTUM_API_BASE_URL = `${baseUrl}/base/`;
