@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { PrismaClient } from "@prisma/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createProductionAppRuntime } from "../src/runtime/production-app.js";
 
 describe("production app runtime", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("builds a local runtime without listening on a port", async () => {
     const runtime = await createProductionAppRuntime({
       ...process.env,
@@ -26,5 +31,25 @@ describe("production app runtime", () => {
     });
 
     await runtime.close();
+  });
+
+  it("disconnects Prisma if setup fails after creating the shared client", async () => {
+    const disconnect = vi.spyOn(PrismaClient.prototype, "$disconnect").mockResolvedValue(undefined);
+
+    await expect(
+      createProductionAppRuntime({
+        ...process.env,
+        DATABASE_URL: "file:./dev.db",
+        CALENDAR_PROVIDER: "google",
+        WHATSAPP_PROVIDER: "",
+        MOMENTUM_ADMIN_TOKEN: "",
+        OUTBOUND_AUTOMATION_TOKEN: "",
+        ENABLE_SIMULATION_API: "false",
+        MOMENTUM_RUNTIME_ENV: "development",
+        GOOGLE_CALENDAR_CLIENT_ID: ""
+      })
+    ).rejects.toThrow("GOOGLE_CALENDAR_CLIENT_ID is required");
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
   });
 });

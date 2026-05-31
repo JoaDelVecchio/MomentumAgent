@@ -70,78 +70,87 @@ export async function createProductionAppRuntime(
     calendarProvider === "google" || onboardingRuntimeNeeded
       ? new PrismaClient()
       : undefined;
-  const googleRuntime =
-    calendarProvider === "google"
-      ? await buildGoogleCalendarRuntime({ prisma: requirePrisma(sharedPrisma), env })
-      : undefined;
-  const onboardingService = onboardingRuntimeNeeded
-    ? new OnboardingService({
-        onboarding: new PrismaOnboardingRepository(
-          requireOnboardingPrisma(sharedPrisma, adminConfig.enabled ? "admin" : "productionActivation")
-        ),
-        operational: new PrismaOperationalRepository(
-          requireOnboardingPrisma(sharedPrisma, adminConfig.enabled ? "admin" : "productionActivation")
-        ),
-        calendarCredentials: googleRuntime?.credentialRepository,
-        calendarRequiredScopes: googleRuntime?.config.scopes,
-        calendarClientFactory: googleRuntime?.createCalendarClient
-      })
-    : undefined;
-  const googleCalendarOnboardingService =
-    adminConfig.enabled && googleRuntime
-      ? new GoogleCalendarOnboardingService({
-          credentials: googleRuntime.credentialRepository,
-          requiredScopes: googleRuntime.config.scopes,
-          oauthService: googleRuntime.oauthService,
-          calendarClientFactory: googleRuntime.createCalendarClient
+  let app: FastifyInstance | undefined;
+
+  try {
+    const googleRuntime =
+      calendarProvider === "google"
+        ? await buildGoogleCalendarRuntime({ prisma: requirePrisma(sharedPrisma), env })
+        : undefined;
+    const onboardingService = onboardingRuntimeNeeded
+      ? new OnboardingService({
+          onboarding: new PrismaOnboardingRepository(
+            requireOnboardingPrisma(sharedPrisma, adminConfig.enabled ? "admin" : "productionActivation")
+          ),
+          operational: new PrismaOperationalRepository(
+            requireOnboardingPrisma(sharedPrisma, adminConfig.enabled ? "admin" : "productionActivation")
+          ),
+          calendarCredentials: googleRuntime?.credentialRepository,
+          calendarRequiredScopes: googleRuntime?.config.scopes,
+          calendarClientFactory: googleRuntime?.createCalendarClient
         })
       : undefined;
-  const clinicActivation = onboardingService
-    ? { isClinicActive: (clinicId: string) => onboardingService.isClinicActive(clinicId) }
-    : undefined;
-  const whatsappRuntime =
-    whatsappConfig.provider === "kapso"
-      ? await buildWhatsAppRuntime({
-          prisma: requirePrisma(sharedPrisma),
-          config: whatsappConfig,
-          calendarProvider,
-          calendar: googleRuntime?.calendar,
-          clinicId: readRuntimeClinicId(env),
-          clinicActivation
-        })
+    const googleCalendarOnboardingService =
+      adminConfig.enabled && googleRuntime
+        ? new GoogleCalendarOnboardingService({
+            credentials: googleRuntime.credentialRepository,
+            requiredScopes: googleRuntime.config.scopes,
+            oauthService: googleRuntime.oauthService,
+            calendarClientFactory: googleRuntime.createCalendarClient
+          })
+        : undefined;
+    const clinicActivation = onboardingService
+      ? { isClinicActive: (clinicId: string) => onboardingService.isClinicActive(clinicId) }
       : undefined;
+    const whatsappRuntime =
+      whatsappConfig.provider === "kapso"
+        ? await buildWhatsAppRuntime({
+            prisma: requirePrisma(sharedPrisma),
+            config: whatsappConfig,
+            calendarProvider,
+            calendar: googleRuntime?.calendar,
+            clinicId: readRuntimeClinicId(env),
+            clinicActivation
+          })
+        : undefined;
 
-  const app = buildApp({
-    enableSimulationRoutes,
-    calendarProvider,
-    simulationCalendar: googleRuntime?.calendar,
-    googleCalendarOAuthService: googleRuntime?.oauthService,
-    googleCalendarSetupToken: googleRuntime?.setupToken,
-    whatsappKapsoWebhook: whatsappRuntime?.webhook,
-    clinicActivation,
-    outboundAutomation:
-      outboundConfig.enabled && whatsappRuntime
-        ? { token: outboundConfig.token, service: whatsappRuntime.outboundAutomation }
-        : undefined,
-    onboarding:
-      adminConfig.enabled && onboardingService
-        ? { adminToken: adminConfig.token, service: onboardingService }
-        : undefined,
-    googleCalendarOnboarding:
-      adminConfig.enabled && googleCalendarOnboardingService
-        ? { adminToken: adminConfig.token, service: googleCalendarOnboardingService }
-        : undefined
-  });
+    app = buildApp({
+      enableSimulationRoutes,
+      calendarProvider,
+      simulationCalendar: googleRuntime?.calendar,
+      googleCalendarOAuthService: googleRuntime?.oauthService,
+      googleCalendarSetupToken: googleRuntime?.setupToken,
+      whatsappKapsoWebhook: whatsappRuntime?.webhook,
+      clinicActivation,
+      outboundAutomation:
+        outboundConfig.enabled && whatsappRuntime
+          ? { token: outboundConfig.token, service: whatsappRuntime.outboundAutomation }
+          : undefined,
+      onboarding:
+        adminConfig.enabled && onboardingService
+          ? { adminToken: adminConfig.token, service: onboardingService }
+          : undefined,
+      googleCalendarOnboarding:
+        adminConfig.enabled && googleCalendarOnboardingService
+          ? { adminToken: adminConfig.token, service: googleCalendarOnboardingService }
+          : undefined
+    });
+    const runtimeApp = app;
 
-  return {
-    app,
-    prisma: sharedPrisma,
-    summary,
-    close: async () => {
-      await app.close();
-      await sharedPrisma?.$disconnect();
-    }
-  };
+    return {
+      app: runtimeApp,
+      prisma: sharedPrisma,
+      summary,
+      close: async () => {
+        await runtimeApp.close();
+        await sharedPrisma?.$disconnect();
+      }
+    };
+  } catch (error) {
+    await app?.close();
+    await sharedPrisma?.$disconnect();
+    throw error;
+  }
 }
 
 function requirePrisma(prisma: PrismaClient | undefined): PrismaClient {
