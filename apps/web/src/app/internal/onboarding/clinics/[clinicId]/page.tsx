@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { apiJson, adminHeaders } from "../../../../../lib/api";
+import { calendarMappingWarnings } from "../../../../../lib/google-calendar-onboarding-ui";
 import type {
   ClinicPaymentStatus,
   ClinicSetupRecord,
@@ -203,6 +204,11 @@ export default function ClinicSetupPage() {
   }
 
   const parsedProfile = parseEditableProfile(profileJson);
+  const mappingWarnings = calendarMappingWarnings({
+    calendars: googleCalendars,
+    professionals: parsedProfile?.professionals ?? [],
+    services: parsedProfile?.services ?? []
+  });
   const mappedCalendarIds = new Set(
     (parsedProfile?.professionals ?? [])
       .map((professional) => professional.calendarId ?? "")
@@ -341,6 +347,22 @@ export default function ClinicSetupPage() {
           </div>
           {googleStatus?.reconnectRequired ? (
             <p className="internal-empty">Reconnect Google Calendar to grant the required calendar-list permission.</p>
+          ) : null}
+          {mappingWarnings.unmappedServiceNames.length > 0 ? (
+            <p className="internal-empty">
+              Services with professionals missing a writable calendar: {mappingWarnings.unmappedServiceNames.join(", ")}.
+            </p>
+          ) : null}
+          {mappingWarnings.nonBookableCalendarNames.length > 0 ? (
+            <p className="internal-empty">
+              Only owner/writer calendars can be selected. Non-bookable calendars:{" "}
+              {mappingWarnings.nonBookableCalendarNames.join(", ")}.
+            </p>
+          ) : null}
+          {mappingWarnings.duplicateCalendarIds.length > 0 ? (
+            <p className="internal-empty">
+              Duplicate calendar mappings in profile JSON: {mappingWarnings.duplicateCalendarIds.join(", ")}.
+            </p>
           ) : null}
           <div className="calendar-map">
             {(parsedProfile?.professionals ?? []).map((professional) => (
