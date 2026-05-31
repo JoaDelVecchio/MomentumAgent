@@ -118,7 +118,16 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
   }
 
   async isClinicActive(clinicId: Id): Promise<boolean> {
-    return this.setups.get(clinicId)?.lifecycleState === "active";
+    const setup = this.setups.get(clinicId);
+    return Boolean(
+      setup &&
+        setup.lifecycleState === "active" &&
+        (setup.paymentStatus === "paid" || setup.paymentStatus === "trial" || setup.paymentStatus === "waived") &&
+        setup.whatsappReady &&
+        setup.calendarConnected &&
+        setup.testConversationPassed &&
+        setup.activationChecklistCompleted
+    );
   }
 
   private requireLead(leadId: Id) {

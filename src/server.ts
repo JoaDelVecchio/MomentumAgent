@@ -42,7 +42,8 @@ const onboardingService = onboardingRuntimeNeeded
         requireOnboardingPrisma(sharedPrisma, adminConfig.enabled ? "admin" : "productionActivation")
       ),
       calendarCredentials: googleRuntime?.credentialRepository,
-      calendarRequiredScopes: googleRuntime?.config.scopes
+      calendarRequiredScopes: googleRuntime?.config.scopes,
+      calendarClientFactory: googleRuntime?.createCalendarClient
     })
   : undefined;
 const googleCalendarOnboardingService =

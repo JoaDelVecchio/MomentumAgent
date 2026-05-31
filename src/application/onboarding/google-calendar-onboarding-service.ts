@@ -95,22 +95,34 @@ export function googleCalendarConnectionStatus(input: {
   };
 }
 
-export function hasUsableProfessionalCalendarMappings(profile: ClinicProfile | undefined): boolean {
+export function hasUsableProfessionalCalendarMappings(
+  profile: ClinicProfile | undefined,
+  calendars?: GoogleCalendarSummary[]
+): boolean {
   if (!profile) {
     return false;
   }
   if (profile.services.length === 0) {
     return false;
   }
+  const bookableCalendarIds = calendars
+    ? new Set(calendars.filter((calendar) => calendar.bookable).map((calendar) => calendar.id))
+    : undefined;
   const calendarIds = profile.professionals
     .map((professional) => professional.calendarId.trim())
     .filter((calendarId) => calendarId.length > 0);
   if (calendarIds.length === 0 || new Set(calendarIds).size !== calendarIds.length) {
     return false;
   }
+  if (bookableCalendarIds && !calendarIds.every((calendarId) => bookableCalendarIds.has(calendarId))) {
+    return false;
+  }
   const mappedProfessionalIds = new Set(
     profile.professionals
-      .filter((professional) => professional.calendarId.trim().length > 0)
+      .filter((professional) => {
+        const calendarId = professional.calendarId.trim();
+        return calendarId.length > 0 && (!bookableCalendarIds || bookableCalendarIds.has(calendarId));
+      })
       .map((professional) => professional.id)
   );
   return profile.services.every((service) =>

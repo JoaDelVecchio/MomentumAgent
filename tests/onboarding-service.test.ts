@@ -129,6 +129,7 @@ describe("OnboardingService", () => {
       operational: context.operational,
       calendarCredentials: credentials,
       calendarRequiredScopes: [...GOOGLE_CALENDAR_SCOPES],
+      calendarClientFactory: () => new FakeGoogleCalendarDiscoveryClient([bookableCalendar("cal_perez")]),
       now: () => new Date("2026-06-01T12:00:00.000Z")
     });
     await service.createManualClinic({
@@ -227,6 +228,7 @@ describe("OnboardingService", () => {
       operational: context.operational,
       calendarCredentials: credentials,
       calendarRequiredScopes: [...GOOGLE_CALENDAR_SCOPES],
+      calendarClientFactory: () => new FakeGoogleCalendarDiscoveryClient([bookableCalendar("shared_calendar")]),
       now: () => new Date("2026-06-01T12:00:00.000Z")
     });
     await service.createManualClinic({
@@ -255,20 +257,16 @@ describe("OnboardingService", () => {
       refreshToken: "refresh_token"
     });
 
-    await service.saveClinicProfile({
-      ...profile("clinic_1"),
-      professionals: [
-        { ...profile("clinic_1").professionals[0], id: "pro_perez", calendarId: "shared_calendar" },
-        { ...profile("clinic_1").professionals[0], id: "pro_gomez", name: "Dra. Gomez", calendarId: "shared_calendar" }
-      ],
-      services: [{ ...profile("clinic_1").services[0], professionalIds: ["pro_perez", "pro_gomez"] }]
-    });
-
-    await expect(service.readiness("clinic_1")).resolves.toMatchObject({
-      clinicId: "clinic_1",
-      ready: false,
-      missing: ["calendar"]
-    });
+    await expect(
+      service.saveClinicProfile({
+        ...profile("clinic_1"),
+        professionals: [
+          { ...profile("clinic_1").professionals[0], id: "pro_perez", calendarId: "shared_calendar" },
+          { ...profile("clinic_1").professionals[0], id: "pro_gomez", name: "Dra. Gomez", calendarId: "shared_calendar" }
+        ],
+        services: [{ ...profile("clinic_1").services[0], professionalIds: ["pro_perez", "pro_gomez"] }]
+      })
+    ).rejects.toThrow("Clinic profile calendar mappings must use writable Google calendars");
   });
 
   it("blocks activation when the stored profile has no services or professional calendars", async () => {
@@ -417,6 +415,98 @@ describe("OnboardingService", () => {
     await expect(context.service.isClinicActive("clinic_1")).resolves.toBe(true);
   });
 
+  it("reports a Google-activated clinic active without the manual calendarConnected flag", async () => {
+    const context = buildGoogleContext();
+    await context.service.createManualClinic({
+      clinicId: "clinic_1",
+      clinicName: "Clinica Demo",
+      primaryContactName: "Ana Manager",
+      primaryContactPhone: "+5491111111111",
+      city: "Buenos Aires",
+      country: "Argentina",
+      source: "presencial",
+      now: new Date("2026-06-01T12:00:00.000Z")
+    });
+    await context.service.saveClinicProfile(profile("clinic_1"));
+    await context.service.updatePaymentStatus({ clinicId: "clinic_1", paymentStatus: "trial" });
+    await context.service.updateReadinessFlags({
+      clinicId: "clinic_1",
+      whatsappReady: true,
+      testConversationPassed: true,
+      activationChecklistCompleted: true
+    });
+    await context.credentials.save({
+      clinicId: "clinic_1",
+      provider: "google",
+      scopes: [...GOOGLE_CALENDAR_SCOPES],
+      accessToken: "access_token",
+      refreshToken: "refresh_token"
+    });
+
+    await expect(context.service.readiness("clinic_1")).resolves.toEqual({
+      clinicId: "clinic_1",
+      ready: true,
+      missing: []
+    });
+    await expect(
+      context.service.activateClinic({ clinicId: "clinic_1", now: new Date("2026-06-01T12:03:00.000Z") })
+    ).resolves.toEqual(expect.objectContaining({ calendarConnected: false, lifecycleState: "active" }));
+    await expect(context.onboarding.isClinicActive("clinic_1")).resolves.toBe(false);
+    await expect(context.service.isClinicActive("clinic_1")).resolves.toBe(true);
+  });
+
+  it("rejects saving connected Google mappings to read-only or undiscovered calendars", async () => {
+    const context = buildGoogleContext({
+      calendars: [
+        { ...bookableCalendar("cal_readonly"), bookable: false, accessRole: "reader" }
+      ]
+    });
+    await context.credentials.save({
+      clinicId: "clinic_1",
+      provider: "google",
+      scopes: [...GOOGLE_CALENDAR_SCOPES],
+      accessToken: "access_token",
+      refreshToken: "refresh_token"
+    });
+
+    await expect(
+      context.service.saveClinicProfile({
+        ...profile("clinic_1"),
+        professionals: [{ ...profile("clinic_1").professionals[0], calendarId: "cal_readonly" }]
+      })
+    ).rejects.toThrow("Clinic profile calendar mappings must use writable Google calendars");
+    await expect(
+      context.service.saveClinicProfile({
+        ...profile("clinic_1"),
+        professionals: [{ ...profile("clinic_1").professionals[0], calendarId: "cal_missing" }]
+      })
+    ).rejects.toThrow("Clinic profile calendar mappings must use writable Google calendars");
+  });
+
+  it("keeps Google readiness and active guard missing when persisted mappings are not writable calendars", async () => {
+    const context = buildGoogleContext({
+      calendars: [
+        { ...bookableCalendar("cal_perez"), bookable: false, accessRole: "reader" }
+      ]
+    });
+    await makeReadyActiveClinic(context.service, context.onboarding);
+    await context.credentials.save({
+      clinicId: "clinic_1",
+      provider: "google",
+      scopes: [...GOOGLE_CALENDAR_SCOPES],
+      accessToken: "access_token",
+      refreshToken: "refresh_token"
+    });
+
+    await expect(context.service.readiness("clinic_1")).resolves.toEqual({
+      clinicId: "clinic_1",
+      ready: false,
+      missing: ["calendar"]
+    });
+    await expect(context.onboarding.isClinicActive("clinic_1")).resolves.toBe(true);
+    await expect(context.service.isClinicActive("clinic_1")).resolves.toBe(false);
+  });
+
   it("rejects duplicate Google calendar mappings before reporting an already-active clinic active", async () => {
     const context = buildGoogleContext();
     await makeReadyActiveClinic(context.service, context.onboarding);
@@ -427,7 +517,7 @@ describe("OnboardingService", () => {
       accessToken: "access_token",
       refreshToken: "refresh_token"
     });
-    await context.service.saveClinicProfile({
+    await context.operational.upsertClinicProfile({
       ...profile("clinic_1"),
       professionals: [
         { ...profile("clinic_1").professionals[0], id: "pro_perez", calendarId: "shared_calendar" },
@@ -485,18 +575,38 @@ function buildContext() {
   return { onboarding, operational, service };
 }
 
-function buildGoogleContext() {
+function buildGoogleContext(options: { calendars?: ReturnType<typeof bookableCalendar>[] } = {}) {
   const onboarding = new InMemoryOnboardingRepository();
   const operational = new InMemoryRepositories();
   const credentials = new InMemoryCalendarCredentialRepository();
+  const calendars = options.calendars ?? [bookableCalendar("cal_perez")];
   const service = new OnboardingService({
     onboarding,
     operational,
     calendarCredentials: credentials,
     calendarRequiredScopes: [...GOOGLE_CALENDAR_SCOPES],
+    calendarClientFactory: () => new FakeGoogleCalendarDiscoveryClient(calendars),
     now: () => new Date("2026-06-01T12:00:00.000Z")
   });
   return { onboarding, operational, credentials, service };
+}
+
+class FakeGoogleCalendarDiscoveryClient {
+  constructor(private readonly calendars: ReturnType<typeof bookableCalendar>[]) {}
+
+  async listCalendars() {
+    return this.calendars;
+  }
+}
+
+function bookableCalendar(id: string) {
+  return {
+    id,
+    summary: id,
+    primary: false,
+    accessRole: "writer",
+    bookable: true
+  };
 }
 
 async function makeReadyActiveClinic(

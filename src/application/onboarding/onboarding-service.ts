@@ -1,4 +1,5 @@
 import type { ClinicProfile, Id } from "../../domain/types.js";
+import { DomainError } from "../../domain/errors.js";
 import type { CalendarCredentialRepository, CalendarCredentials } from "../../ports/calendar-auth.js";
 import type {
   ClinicKnowledgeRecord,
@@ -13,6 +14,7 @@ import type {
 import type { OperationalRepository } from "../../ports/repositories.js";
 import {
   googleCalendarConnectionStatus,
+  type GoogleCalendarDiscoveryClient,
   hasUsableProfessionalCalendarMappings
 } from "./google-calendar-onboarding-service.js";
 
@@ -21,6 +23,7 @@ export type OnboardingServiceOptions = {
   operational: OperationalRepository;
   calendarCredentials?: CalendarCredentialRepository;
   calendarRequiredScopes?: string[];
+  calendarClientFactory?: (clinicId: Id) => GoogleCalendarDiscoveryClient;
   now?: () => Date;
 };
 
@@ -134,6 +137,7 @@ export class OnboardingService {
   }
 
   async saveClinicProfile(profile: ClinicProfile): Promise<ClinicProfile> {
+    await this.assertGoogleCalendarMappingsCanBeSaved(profile);
     await this.options.operational.upsertClinicProfile(profile);
     return profile;
   }
@@ -174,7 +178,7 @@ export class OnboardingService {
     ]);
     const paymentOk =
       setup?.paymentStatus === "paid" || setup?.paymentStatus === "trial" || setup?.paymentStatus === "waived";
-    const calendarOk = this.isCalendarReady(setup, profile, googleCredentials);
+    const calendarOk = await this.isCalendarReady(clinicId, setup, profile, googleCredentials);
     const missing = [
       !isCompleteOperationalProfile(profile) ? "clinic_profile" : undefined,
       !paymentOk ? "payment" : undefined,
@@ -213,13 +217,16 @@ export class OnboardingService {
   }
 
   async isClinicActive(clinicId: Id): Promise<boolean> {
-    const [active, setup, profile, googleCredentials] = await Promise.all([
-      this.options.onboarding.isClinicActive(clinicId),
+    const [setup, profile, googleCredentials] = await Promise.all([
       this.options.onboarding.getClinicSetup(clinicId),
       this.options.operational.getClinicProfile(clinicId),
       this.options.calendarCredentials?.get({ clinicId, provider: "google" })
     ]);
-    return active && isCompleteOperationalProfile(profile) && this.isCalendarReady(setup, profile, googleCredentials);
+    return (
+      isActiveSetup(setup) &&
+      isCompleteOperationalProfile(profile) &&
+      await this.isCalendarReady(clinicId, setup, profile, googleCredentials)
+    );
   }
 
   private async requireSetup(clinicId: Id): Promise<ClinicSetupRecord> {
@@ -234,11 +241,35 @@ export class OnboardingService {
     return new Date(override ?? this.options.now?.() ?? new Date());
   }
 
-  private isCalendarReady(
+  private async assertGoogleCalendarMappingsCanBeSaved(profile: ClinicProfile): Promise<void> {
+    if (!this.options.calendarCredentials) {
+      return;
+    }
+    if (!this.options.calendarRequiredScopes?.length || !this.options.calendarClientFactory) {
+      return;
+    }
+
+    const credentials = await this.options.calendarCredentials.get({ clinicId: profile.clinicId, provider: "google" });
+    const status = googleCalendarConnectionStatus({
+      credentials,
+      requiredScopes: this.options.calendarRequiredScopes
+    });
+    if (!status.connected || status.reconnectRequired) {
+      return;
+    }
+
+    const calendars = await this.options.calendarClientFactory(profile.clinicId).listCalendars();
+    if (!hasUsableProfessionalCalendarMappings(profile, calendars)) {
+      throw new DomainError("Clinic profile calendar mappings must use writable Google calendars");
+    }
+  }
+
+  private async isCalendarReady(
+    clinicId: Id,
     setup: ClinicSetupRecord | undefined,
     profile: ClinicProfile | undefined,
     googleCredentials: CalendarCredentials | undefined
-  ): boolean {
+  ): Promise<boolean> {
     if (!this.options.calendarCredentials) {
       return Boolean(setup?.calendarConnected);
     }
@@ -249,8 +280,24 @@ export class OnboardingService {
       credentials: googleCredentials,
       requiredScopes: this.options.calendarRequiredScopes
     });
-    return status.connected && !status.reconnectRequired && hasUsableProfessionalCalendarMappings(profile);
+    if (!status.connected || status.reconnectRequired || !this.options.calendarClientFactory) {
+      return false;
+    }
+
+    const calendars = await this.options.calendarClientFactory(clinicId).listCalendars();
+    return hasUsableProfessionalCalendarMappings(profile, calendars);
   }
+}
+
+function isActiveSetup(setup: ClinicSetupRecord | undefined): boolean {
+  return Boolean(
+    setup &&
+      setup.lifecycleState === "active" &&
+      (setup.paymentStatus === "paid" || setup.paymentStatus === "trial" || setup.paymentStatus === "waived") &&
+      setup.whatsappReady &&
+      setup.testConversationPassed &&
+      setup.activationChecklistCompleted
+  );
 }
 
 function isCompleteOperationalProfile(profile: ClinicProfile | undefined): boolean {

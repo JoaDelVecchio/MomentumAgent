@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { InMemoryCalendarCredentialRepository } from "../src/adapters/memory/calendar-auth-repository.js";
 import { InMemoryOnboardingRepository } from "../src/adapters/memory/onboarding-repository.js";
 import { InMemoryRepositories } from "../src/adapters/memory/repositories.js";
 import { buildApp } from "../src/api/app.js";
 import { OnboardingService } from "../src/application/onboarding/onboarding-service.js";
 import { readAdminConfig } from "../src/config/admin.js";
+import { GOOGLE_CALENDAR_SCOPES } from "../src/config/google-calendar.js";
 
 describe("onboarding routes", () => {
   it("accepts public landing leads without admin auth", async () => {
@@ -202,6 +204,33 @@ describe("onboarding routes", () => {
     await app.close();
   });
 
+  it("rejects Google profile mappings to non-writable calendars through internal onboarding", async () => {
+    const context = buildGoogleContext();
+    await context.credentials.save({
+      clinicId: "clinic_1",
+      provider: "google",
+      scopes: [...GOOGLE_CALENDAR_SCOPES],
+      accessToken: "access_token",
+      refreshToken: "refresh_token"
+    });
+    const app = buildApp({ onboarding: { service: context.service, adminToken: "secret" } });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/internal/onboarding/clinics/clinic_1/profile",
+      headers: { authorization: "Bearer secret" },
+      payload: {
+        ...clinicProfilePayload(),
+        professionals: [{ ...clinicProfilePayload().professionals[0], calendarId: "cal_readonly" }]
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "invalid_clinic_profile" });
+    expect(await context.operational.getClinicProfile("clinic_1")).toBeUndefined();
+    await app.close();
+  });
+
   it("uses the path clinic id when profile payload includes a different clinic id", async () => {
     const context = buildContext();
     const app = buildApp({ onboarding: { service: context.service, adminToken: "secret" } });
@@ -249,6 +278,33 @@ function buildContext() {
     now: () => new Date("2026-06-01T12:00:00.000Z")
   });
   return { onboarding, operational, service };
+}
+
+function buildGoogleContext() {
+  const onboarding = new InMemoryOnboardingRepository();
+  const operational = new InMemoryRepositories();
+  const credentials = new InMemoryCalendarCredentialRepository();
+  const service = new OnboardingService({
+    onboarding,
+    operational,
+    calendarCredentials: credentials,
+    calendarRequiredScopes: [...GOOGLE_CALENDAR_SCOPES],
+    calendarClientFactory: () => ({
+      async listCalendars() {
+        return [
+          {
+            id: "cal_readonly",
+            summary: "Readonly",
+            primary: false,
+            accessRole: "reader",
+            bookable: false
+          }
+        ];
+      }
+    }),
+    now: () => new Date("2026-06-01T12:00:00.000Z")
+  });
+  return { onboarding, operational, credentials, service };
 }
 
 function leadPayload() {
