@@ -49,6 +49,10 @@ export function assertRuntimeSafety(input: RuntimeSafetyInput): void {
     throw new Error("ENABLE_SIMULATION_API must be false in production");
   }
 
+  if (input.outboundAutomationEnabled && input.whatsappProvider !== "kapso") {
+    throw new Error("OUTBOUND_AUTOMATION_TOKEN requires WHATSAPP_PROVIDER=kapso in production");
+  }
+
   if (input.whatsappProvider === "kapso" && !input.publicWebhookUrl?.trim()) {
     throw new Error("MOMENTUM_PUBLIC_WEBHOOK_URL is required when WHATSAPP_PROVIDER=kapso in production");
   }

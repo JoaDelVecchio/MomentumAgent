@@ -71,6 +71,20 @@ describe("runtime environment safety", () => {
     ).toThrow("MOMENTUM_PUBLIC_WEBHOOK_URL is required when WHATSAPP_PROVIDER=kapso in production");
   });
 
+  it("rejects outbound automation in production without Kapso WhatsApp runtime", () => {
+    expect(() =>
+      assertRuntimeSafety({
+        runtimeMode: "production",
+        databaseUrl: "postgresql://user:pass@db.example.com:5432/momentum",
+        enableSimulationApi: false,
+        calendarProvider: "google",
+        whatsappProvider: "disabled",
+        outboundAutomationEnabled: true,
+        adminEnabled: true
+      })
+    ).toThrow("OUTBOUND_AUTOMATION_TOKEN requires WHATSAPP_PROVIDER=kapso in production");
+  });
+
   it("builds a redacted startup summary", () => {
     expect(
       buildRuntimeSummary({

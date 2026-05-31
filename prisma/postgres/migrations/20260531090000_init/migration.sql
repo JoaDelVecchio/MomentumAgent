@@ -450,4 +450,3 @@ ALTER TABLE "ProcessedWebhookDelivery" ADD CONSTRAINT "ProcessedWebhookDelivery_
 
 -- AddForeignKey
 ALTER TABLE "OutboundDelivery" ADD CONSTRAINT "OutboundDelivery_clinicId_fkey" FOREIGN KEY ("clinicId") REFERENCES "Clinic"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
