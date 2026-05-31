@@ -42,11 +42,15 @@ export async function createProductionAppRuntime(
   const adminConfig = readAdminConfig(env);
   const runtimeMode = readRuntimeMode(env);
   const enableSimulationRoutes = env.ENABLE_SIMULATION_API === "true";
+  const databaseUrl = readDatabaseUrl(env);
+  if (databaseUrl) {
+    env.DATABASE_URL = databaseUrl;
+  }
   const logger = new ConsoleLogger();
 
   assertRuntimeSafety({
     runtimeMode,
-    databaseUrl: env.DATABASE_URL,
+    databaseUrl,
     enableSimulationApi: enableSimulationRoutes,
     calendarProvider,
     whatsappProvider: whatsappConfig.provider,
@@ -57,7 +61,7 @@ export async function createProductionAppRuntime(
 
   const summary = buildRuntimeSummary({
     runtimeMode,
-    databaseUrl: env.DATABASE_URL,
+    databaseUrl,
     enableSimulationApi: enableSimulationRoutes,
     calendarProvider,
     whatsappProvider: whatsappConfig.provider,
@@ -197,4 +201,18 @@ function readCalendarProvider(provider: string | undefined): CalendarProvider {
     return "google";
   }
   throw new Error(`Unsupported CALENDAR_PROVIDER: ${provider}`);
+}
+
+function readDatabaseUrl(env: NodeJS.ProcessEnv) {
+  return (
+    firstPresent(env.DATABASE_URL) ??
+    firstPresent(env.STORAGE_DATABASE_URL) ??
+    firstPresent(env.STORAGE_POSTGRES_PRISMA_URL) ??
+    firstPresent(env.STORAGE_POSTGRES_URL)
+  );
+}
+
+function firstPresent(value: string | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
 }

@@ -52,4 +52,28 @@ describe("production app runtime", () => {
 
     expect(disconnect).toHaveBeenCalledTimes(1);
   });
+
+  it("uses Vercel Storage Postgres URLs when DATABASE_URL is blank", async () => {
+    const env = {
+      ...process.env,
+      DATABASE_URL: "",
+      STORAGE_DATABASE_URL: "postgresql://user:pass@db.example.com:5432/momentum",
+      CALENDAR_PROVIDER: "fake",
+      WHATSAPP_PROVIDER: "",
+      MOMENTUM_ADMIN_TOKEN: "",
+      OUTBOUND_AUTOMATION_TOKEN: "",
+      ENABLE_SIMULATION_API: "false",
+      MOMENTUM_RUNTIME_ENV: "production"
+    };
+
+    const runtime = await createProductionAppRuntime(env);
+
+    expect(env.DATABASE_URL).toBe("postgresql://user:pass@db.example.com:5432/momentum");
+    expect(runtime.summary).toMatchObject({
+      runtimeMode: "production",
+      database: "postgres"
+    });
+
+    await runtime.close();
+  });
 });
