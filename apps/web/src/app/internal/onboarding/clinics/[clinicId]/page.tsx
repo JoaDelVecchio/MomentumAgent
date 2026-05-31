@@ -345,7 +345,10 @@ export default function ClinicSetupPage() {
               Refresh calendars
             </button>
           </div>
-          {googleStatus?.reconnectRequired ? (
+          {googleStatus && !googleStatus.connected ? (
+            <p className="internal-empty">Connect Google Calendar to discover calendars and map each professional.</p>
+          ) : null}
+          {googleStatus?.connected && googleStatus.reconnectRequired ? (
             <p className="internal-empty">Reconnect Google Calendar to grant the required calendar-list permission.</p>
           ) : null}
           {mappingWarnings.unmappedServiceNames.length > 0 ? (
@@ -375,6 +378,9 @@ export default function ClinicSetupPage() {
                   }
                 >
                   <option value="">Select calendar</option>
+                  {professional.calendarId && !googleCalendars.some((calendar) => calendar.id === professional.calendarId) ? (
+                    <option value={professional.calendarId}>Current mapping: {professional.calendarId}</option>
+                  ) : null}
                   {googleCalendars.map((calendar) => (
                     <option
                       disabled={
