@@ -7,21 +7,25 @@ import {
   OutboundAutomationService,
   type OutboundAutomationSummary
 } from "../src/application/outbound/outbound-automation-service.js";
-import type { AuditLogPort } from "../src/ports/audit-log.js";
+import type { AuditEvent, AuditEventInput, AuditLogPort } from "../src/ports/audit-log.js";
 import type { CalendarPort } from "../src/ports/calendar.js";
 import type { OperationalRepository } from "../src/ports/repositories.js";
 
 const zeroSummary: OutboundAutomationSummary = { sent: 0, blocked: 0, failed: 0, skipped: 0 };
 
 describe("production activation gates", () => {
-  it("ignores production WhatsApp webhooks for inactive clinics without calling inbound handling", async () => {
+  it("audits and logs production WhatsApp webhooks ignored for inactive clinics", async () => {
     const inboundService = new FakeInboundService();
+    const audit = new FakeAuditLog();
+    const logger = new FakeLogger();
     const app = buildApp({
       clinicActivation: { isClinicActive: () => false },
+      logger,
       whatsappKapsoWebhook: {
         secret: "webhook_secret",
         phoneNumberClinicMap: { "123456789012345": "clinic_1" },
-        inboundService: inboundService as unknown as WhatsAppInboundService
+        inboundService: inboundService as unknown as WhatsAppInboundService,
+        audit
       }
     });
     const rawBody = JSON.stringify(kapsoReceivedMessagePayload());
@@ -36,13 +40,73 @@ describe("production activation gates", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ status: "ignored", reason: "clinic_inactive" });
     expect(inboundService.calls).toBe(0);
+    expect(audit.events).toEqual([
+      expect.objectContaining({
+        clinicId: "clinic_1",
+        type: "whatsapp.inbound.ignored_inactive",
+        metadata: { providerPhoneNumberId: "123456789012345" }
+      })
+    ]);
+    expect(logger.entries).toEqual([
+      expect.objectContaining({
+        level: "warn",
+        event: "whatsapp.inbound.ignored_inactive",
+        clinicId: "clinic_1",
+        providerPhoneNumberId: "123456789012345"
+      })
+    ]);
 
     await app.close();
   });
 
-  it("rejects internal outbound runs for inactive clinics without calling automation", async () => {
-    const service = new FakeOutboundAutomationService();
+  it("logs and ignores inactive WhatsApp webhook audit failures", async () => {
+    const inboundService = new FakeInboundService();
+    const logger = new FakeLogger();
     const app = buildApp({
+      clinicActivation: { isClinicActive: () => false },
+      logger,
+      whatsappKapsoWebhook: {
+        secret: "webhook_secret",
+        phoneNumberClinicMap: { "123456789012345": "clinic_1" },
+        inboundService: inboundService as unknown as WhatsAppInboundService,
+        audit: new FailingAuditLog()
+      }
+    });
+    const rawBody = JSON.stringify(kapsoReceivedMessagePayload());
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/whatsapp/kapso",
+      headers: signedWebhookHeaders(rawBody),
+      payload: rawBody
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ status: "ignored", reason: "clinic_inactive" });
+    expect(inboundService.calls).toBe(0);
+    expect(logger.entries).toEqual([
+      expect.objectContaining({
+        level: "warn",
+        event: "whatsapp.inbound.ignored_inactive",
+        clinicId: "clinic_1",
+        providerPhoneNumberId: "123456789012345"
+      }),
+      expect.objectContaining({
+        level: "error",
+        event: "whatsapp.inbound.audit_failed",
+        clinicId: "clinic_1",
+        error: expect.any(String)
+      })
+    ]);
+
+    await app.close();
+  });
+
+  it("logs internal outbound runs rejected for inactive clinics without calling automation", async () => {
+    const service = new FakeOutboundAutomationService();
+    const logger = new FakeLogger();
+    const app = buildApp({
+      logger,
       clinicActivation: { isClinicActive: () => false },
       outboundAutomation: { token: "secret", service }
     });
@@ -57,6 +121,13 @@ describe("production activation gates", () => {
     expect(response.statusCode).toBe(409);
     expect(response.json()).toEqual({ error: "clinic_inactive" });
     expect(service.calls).toEqual([]);
+    expect(logger.entries).toEqual([
+      expect.objectContaining({
+        level: "warn",
+        event: "outbound.run.rejected_inactive",
+        clinicId: "clinic_1"
+      })
+    ]);
 
     await app.close();
   });
@@ -182,5 +253,40 @@ class FakeOutboundAutomationService {
   async runDueReactivations(input: { clinicId: string; now: Date }): Promise<OutboundAutomationSummary> {
     this.calls.push(`reactivations:${input.clinicId}:${input.now.toISOString()}`);
     return { ...zeroSummary, sent: 2 };
+  }
+}
+
+class FakeAuditLog {
+  readonly events: AuditEventInput[] = [];
+
+  async record(input: AuditEventInput): Promise<AuditEvent> {
+    this.events.push(input);
+    return {
+      id: `audit_${this.events.length}`,
+      createdAt: new Date("2026-06-02T12:00:00.000Z"),
+      ...input
+    };
+  }
+}
+
+class FailingAuditLog {
+  async record(_input: AuditEventInput): Promise<AuditEvent> {
+    throw new Error("audit foreign key failed");
+  }
+}
+
+class FakeLogger {
+  readonly entries: unknown[] = [];
+
+  info(input: unknown) {
+    this.entries.push({ level: "info", ...(input as object) });
+  }
+
+  warn(input: unknown) {
+    this.entries.push({ level: "warn", ...(input as object) });
+  }
+
+  error(input: unknown) {
+    this.entries.push({ level: "error", ...(input as object) });
   }
 }

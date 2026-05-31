@@ -122,6 +122,7 @@ export async function buildWhatsAppRuntime(input: {
     webhook: {
       secret: input.config.webhookSecret,
       phoneNumberClinicMap: { [input.config.phoneNumberId]: clinicId },
+      audit,
       inboundService: new WhatsAppInboundService({
         repos,
         provider,

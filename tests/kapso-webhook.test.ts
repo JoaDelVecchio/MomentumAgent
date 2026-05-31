@@ -287,6 +287,35 @@ describe("Kapso webhook route", () => {
     expect(context.provider.sentTextMessages).toEqual([]);
   });
 
+  it("logs inbound failures when Kapso payload normalization fails", async () => {
+    const context = buildInboundServiceContext({ kind: "reply", text: "Tengo un turno disponible." });
+    const logger = new FakeLogger();
+    const app = buildWhatsAppWebhookApp(context, logger);
+    const rawBody = JSON.stringify({
+      phone_number_id: "123456789012345",
+      message: { id: "wamid.123", type: "unsupported" },
+      conversation: { id: "conv_123", phone_number_id: "123456789012345" }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/whatsapp/kapso",
+      headers: signedWebhookHeaders(rawBody),
+      payload: rawBody
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "invalid_webhook_payload" });
+    expect(logger.entries).toEqual([
+      expect.objectContaining({
+        level: "error",
+        event: "whatsapp.inbound.failed",
+        clinicId: "clinic_1",
+        error: expect.any(String)
+      })
+    ]);
+  });
+
   it("returns 200 on valid messages and sends exactly one provider message", async () => {
     const context = buildInboundServiceContext({ kind: "reply", text: "Tengo un turno disponible." });
     const app = buildWhatsAppWebhookApp(context);
@@ -413,12 +442,16 @@ function buildInboundServiceContext(result: WorkflowResult & { delayMs?: number 
   return { repos, provider, audit, workflow, service };
 }
 
-function buildWhatsAppWebhookApp(context: ReturnType<typeof buildInboundServiceContext>) {
+function buildWhatsAppWebhookApp(
+  context: ReturnType<typeof buildInboundServiceContext>,
+  logger?: FakeLogger
+) {
   return buildApp({
     whatsappKapsoWebhook: {
       secret: "webhook_secret",
       phoneNumberClinicMap: { "123456789012345": "clinic_1" },
-      inboundService: context.service
+      inboundService: context.service,
+      logger
     }
   });
 }
@@ -455,5 +488,21 @@ class FakeConversationWorkflow {
     this.calls.push(input);
     const { delayMs: _delayMs, ...result } = this.result;
     return result;
+  }
+}
+
+class FakeLogger {
+  readonly entries: unknown[] = [];
+
+  info(input: unknown) {
+    this.entries.push({ level: "info", ...(input as object) });
+  }
+
+  warn(input: unknown) {
+    this.entries.push({ level: "warn", ...(input as object) });
+  }
+
+  error(input: unknown) {
+    this.entries.push({ level: "error", ...(input as object) });
   }
 }

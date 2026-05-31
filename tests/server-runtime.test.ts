@@ -113,6 +113,24 @@ describe("server runtime persistence wiring", () => {
     expect(runtime.outboundAutomation.handleFreedSlot).toEqual(expect.any(Function));
   });
 
+  it("exposes audit logging through the Kapso webhook runtime", async () => {
+    const runtime = await buildWhatsAppRuntime({
+      prisma,
+      clinicId: "clinic_runtime_webhook_audit",
+      config: {
+        provider: "kapso",
+        apiKey: "kapso_api_key",
+        webhookSecret: "kapso_webhook_secret",
+        phoneNumberId: "123456789012348"
+      },
+      calendarProvider: "fake",
+      aiConfig: { provider: "rules" }
+    });
+
+    expect(runtime.webhook.audit).toBeDefined();
+    expect(runtime.webhook.audit?.record).toEqual(expect.any(Function));
+  });
+
   it("creates only minimal clinic rows for Google credential persistence", async () => {
     const clinicId = "clinic_runtime_google";
     await buildGoogleCalendarRuntime({

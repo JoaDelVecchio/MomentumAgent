@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
+import { ConsoleLogger } from "../adapters/console-logger.js";
 import { PrismaOnboardingRepository } from "../adapters/prisma/onboarding-repository.js";
 import { PrismaOperationalRepository } from "../adapters/prisma/operational-repository.js";
 import { buildApp } from "../api/app.js";
@@ -39,6 +40,7 @@ export async function createProductionAppRuntime(
   const adminConfig = readAdminConfig(env);
   const runtimeMode = readRuntimeMode(env);
   const enableSimulationRoutes = env.ENABLE_SIMULATION_API === "true";
+  const logger = new ConsoleLogger();
 
   assertRuntimeSafety({
     runtimeMode,
@@ -122,6 +124,7 @@ export async function createProductionAppRuntime(
       googleCalendarSetupToken: googleRuntime?.setupToken,
       whatsappKapsoWebhook: whatsappRuntime?.webhook,
       clinicActivation,
+      logger,
       outboundAutomation:
         outboundConfig.enabled && whatsappRuntime
           ? { token: outboundConfig.token, service: whatsappRuntime.outboundAutomation }
