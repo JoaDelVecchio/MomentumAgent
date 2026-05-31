@@ -33,6 +33,35 @@ describe("production app runtime", () => {
     await runtime.close();
   });
 
+  it("registers onboarding test mode when admin routes are enabled", async () => {
+    const runtime = await createProductionAppRuntime({
+      ...process.env,
+      DATABASE_URL: "file:./dev.db",
+      CALENDAR_PROVIDER: "fake",
+      WHATSAPP_PROVIDER: "",
+      MOMENTUM_ADMIN_TOKEN: "admin_test_token",
+      OUTBOUND_AUTOMATION_TOKEN: "",
+      ENABLE_SIMULATION_API: "false",
+      MOMENTUM_RUNTIME_ENV: "development"
+    });
+
+    const response = await runtime.app.inject({
+      method: "POST",
+      url: "/internal/onboarding/clinics/clinic_unconfigured_for_route/test-message",
+      headers: {
+        authorization: "Bearer admin_test_token"
+      },
+      payload: {
+        text: "Hola, quiero reservar botox."
+      }
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: "not_found" });
+
+    await runtime.close();
+  });
+
   it("disconnects Prisma if setup fails after creating the shared client", async () => {
     const disconnect = vi.spyOn(PrismaClient.prototype, "$disconnect").mockResolvedValue(undefined);
 

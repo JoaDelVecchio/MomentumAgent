@@ -9,6 +9,7 @@ import { buildApp } from "../api/app.js";
 import { ConversationControlService } from "../application/conversations/conversation-control-service.js";
 import { GoogleCalendarOnboardingService } from "../application/onboarding/google-calendar-onboarding-service.js";
 import { OnboardingService } from "../application/onboarding/onboarding-service.js";
+import { OnboardingTestModeService } from "../application/onboarding/test-mode-service.js";
 import { readAdminConfig } from "../config/admin.js";
 import { optionalEnv } from "../config/env.js";
 import { readOutboundConfig } from "../config/outbound.js";
@@ -19,7 +20,7 @@ import {
   type RuntimeSummary
 } from "../config/runtime-environment.js";
 import { readWhatsAppConfig } from "../config/whatsapp.js";
-import type { CalendarProvider } from "../dev/seed.js";
+import { buildDefaultCalendar, type CalendarProvider } from "../dev/seed.js";
 import {
   buildGoogleCalendarRuntime,
   buildWhatsAppRuntime,
@@ -108,6 +109,15 @@ export async function createProductionAppRuntime(
             calendarClientFactory: googleRuntime.createCalendarClient
           })
         : undefined;
+    const onboardingTestModeService =
+      adminConfig.enabled && onboardingService
+        ? new OnboardingTestModeService({
+            onboarding: new PrismaOnboardingRepository(requirePrisma(sharedPrisma)),
+            operational: new PrismaOperationalRepository(requirePrisma(sharedPrisma)),
+            audit: new PrismaAuditLog(requirePrisma(sharedPrisma)),
+            calendar: googleRuntime?.calendar ?? buildDefaultCalendar(calendarProvider)
+          })
+        : undefined;
     const conversationControl =
       adminConfig.enabled && sharedPrisma
         ? new ConversationControlService({
@@ -145,7 +155,7 @@ export async function createProductionAppRuntime(
           : undefined,
       onboarding:
         adminConfig.enabled && onboardingService
-          ? { adminToken: adminConfig.token, service: onboardingService }
+          ? { adminToken: adminConfig.token, service: onboardingService, testModeService: onboardingTestModeService }
           : undefined,
       googleCalendarOnboarding:
         adminConfig.enabled && googleCalendarOnboardingService
