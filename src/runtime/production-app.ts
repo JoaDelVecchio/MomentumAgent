@@ -47,9 +47,6 @@ export async function createProductionAppRuntime(
   const runtimeMode = readRuntimeMode(env);
   const enableSimulationRoutes = env.ENABLE_SIMULATION_API === "true";
   const databaseUrl = readDatabaseUrl(env);
-  if (databaseUrl) {
-    env.DATABASE_URL = databaseUrl;
-  }
   const logger = new ConsoleLogger();
 
   assertRuntimeSafety({
@@ -140,6 +137,7 @@ export async function createProductionAppRuntime(
             calendarProvider,
             calendar: googleRuntime?.calendar,
             clinicId: readRuntimeClinicId(env),
+            interpreter: conversationInterpreter,
             clinicActivation
           })
         : undefined;

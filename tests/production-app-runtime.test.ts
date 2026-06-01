@@ -6,6 +6,7 @@ import { createPrismaTestContext } from "./helpers/prisma.js";
 describe("production app runtime", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("builds a local runtime without listening on a port", async () => {
@@ -102,6 +103,37 @@ describe("production app runtime", () => {
     }
   });
 
+  it("passes the env-derived interpreter into WhatsApp runtime instead of reading global AI config", async () => {
+    vi.stubEnv("AI_INTERPRETER_PROVIDER", "openai");
+    vi.stubEnv("OPENAI_API_KEY", "");
+    const context = createPrismaTestContext("momentum-production-runtime-whatsapp-ai-");
+    let runtime: Awaited<ReturnType<typeof createProductionAppRuntime>> | undefined;
+
+    try {
+      runtime = await createProductionAppRuntime({
+        ...process.env,
+        DATABASE_URL: `file:${context.databasePath}`,
+        CALENDAR_PROVIDER: "fake",
+        WHATSAPP_PROVIDER: "kapso",
+        KAPSO_API_KEY: "kapso-key",
+        KAPSO_WEBHOOK_SECRET: "webhook-secret",
+        KAPSO_PHONE_NUMBER_ID: "phone_1",
+        MOMENTUM_ADMIN_TOKEN: "",
+        OUTBOUND_AUTOMATION_TOKEN: "",
+        ENABLE_SIMULATION_API: "false",
+        MOMENTUM_RUNTIME_ENV: "development",
+        AI_INTERPRETER_PROVIDER: "rules",
+        OPENAI_API_KEY: ""
+      });
+
+      const response = await runtime.app.inject({ method: "GET", url: "/health" });
+      expect(response.statusCode).toBe(200);
+    } finally {
+      await runtime?.close();
+      await context.cleanup();
+    }
+  });
+
   it("disconnects Prisma if setup fails after creating the shared client", async () => {
     const disconnect = vi.spyOn(PrismaClient.prototype, "$disconnect").mockResolvedValue(undefined);
 
@@ -137,7 +169,7 @@ describe("production app runtime", () => {
 
     const runtime = await createProductionAppRuntime(env);
 
-    expect(env.DATABASE_URL).toBe("postgresql://user:pass@db.example.com:5432/momentum");
+    expect(env.DATABASE_URL).toBe("");
     expect(runtime.summary).toMatchObject({
       runtimeMode: "production",
       database: "postgres"
@@ -161,7 +193,7 @@ describe("production app runtime", () => {
 
     const runtime = await createProductionAppRuntime(env);
 
-    expect(env.DATABASE_URL).toBe("postgresql://user:pass@db.example.com:5432/momentum");
+    expect(env.DATABASE_URL).toBe('""');
     expect(runtime.summary).toMatchObject({
       runtimeMode: "production",
       database: "postgres",
@@ -189,7 +221,7 @@ describe("production app runtime", () => {
 
     const runtime = await createProductionAppRuntime(env);
 
-    expect(env.DATABASE_URL).toBe("postgresql://user:pass@db.example.com:5432/momentum");
+    expect(env.DATABASE_URL).toBe("file:./dev.db");
     expect(runtime.summary).toMatchObject({
       runtimeMode: "production",
       database: "postgres"
