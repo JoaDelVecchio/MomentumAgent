@@ -10,40 +10,58 @@ import {
 const flowSteps = [
   {
     icon: MessageCircle,
-    title: "Lead writes on WhatsApp",
-    body: "Momentum understands intent, service interest, urgency, and the clinic context."
+    title: "El paciente escribe",
+    body: "Momentum identifica intención, urgencia, tratamiento y contexto sin convertir la conversación en un formulario."
   },
   {
     icon: Sparkles,
-    title: "Answers like your front desk",
-    body: "It explains approved services, preparation, pricing notes, and next available actions."
+    title: "Entiende y responde",
+    body: "Contesta con información aprobada por la clínica: servicios, preparación, condiciones y próximos pasos."
   },
   {
     icon: CalendarCheck,
-    title: "Books against real availability",
-    body: "Agenda real. Conversations reales. Turnos confirmados."
+    title: "Ofrece agenda real",
+    body: "Muestra horarios disponibles desde el calendario conectado y evita prometer turnos que no existen."
   },
   {
     icon: UserRoundCheck,
-    title: "Keeps the patient moving",
-    body: "Reschedules, cancels, reminds, follows up, and hands off when a human should step in."
+    title: "Confirma y sostiene",
+    body: "Confirma, recuerda, reprograma y deriva a una persona cuando la conversación lo necesita."
   }
 ];
 
 const automations = [
-  "Bookings",
-  "Reschedules",
-  "Cancellations",
-  "Reminders",
-  "Warm-lead reactivation",
-  "Freed-slot offers",
-  "Human handoff"
+  "Reservas",
+  "Reprogramaciones",
+  "Cancelaciones",
+  "Recordatorios",
+  "Reactivación",
+  "Huecos liberados",
+  "Derivación humana"
 ];
 
 const trustControls = [
-  { icon: CalendarCheck, label: "Live availability only" },
-  { icon: ShieldCheck, label: "Approved answers and handoff rules" },
-  { icon: Clock3, label: "After-hours coverage with auditability" }
+  { icon: CalendarCheck, label: "Agenda real como fuente de verdad" },
+  { icon: ShieldCheck, label: "Respuestas aprobadas y reglas de derivación" },
+  { icon: Clock3, label: "Cobertura fuera de horario con trazabilidad" }
+];
+
+const problemCards = [
+  {
+    icon: Clock3,
+    title: "La velocidad decide",
+    body: "Quien responde claro primero suele quedarse con el turno."
+  },
+  {
+    icon: MessageCircle,
+    title: "WhatsApp no escala solo",
+    body: "Preguntas, precios, horarios y cambios terminan mezclados en el mismo inbox."
+  },
+  {
+    icon: Sparkles,
+    title: "La demanda tibia se pierde",
+    body: "Conversaciones viejas y huecos libres rara vez se reactivan a tiempo."
+  }
 ];
 
 export default function HomePage() {
@@ -51,54 +69,72 @@ export default function HomePage() {
     <main className="site-shell">
       <section className="landing-hero section-band">
         <div className="hero-copy-block">
-          <p className="eyebrow">Momentum AI Receptionist</p>
-          <h1>Turn WhatsApp into your clinic&apos;s appointment engine.</h1>
+          <p className="eyebrow">Momentum para clínicas estéticas</p>
+          <h1>La recepción IA que convierte WhatsApp en turnos confirmados.</h1>
           <p className="hero-copy">
-            Momentum is the AI receptionist for aesthetic and dermatology clinics. It replies,
-            qualifies demand, offers real calendar slots, confirms visits, and brings warm patients
-            back without making your team chase every conversation.
+            Momentum responde consultas, entiende intención, ofrece horarios reales y confirma
+            turnos para clínicas estéticas que no quieren perder pacientes por demora.
           </p>
-          <div className="hero-actions" aria-label="Momentum pilot actions">
+          <div className="hero-actions" aria-label="Acciones para piloto Momentum">
             <a className="primary-link" href="/lead">
-              Activate a pilot
+              Activar piloto
             </a>
             <a className="secondary-link" href="#flow">
-              See the flow
+              Ver cómo funciona
             </a>
+          </div>
+          <div className="hero-proof" aria-label="Diferenciales Momentum">
+            <span>WhatsApp nativo</span>
+            <span>Agenda conectada</span>
+            <span>Piloto asistido</span>
           </div>
         </div>
 
-        <div className="product-mockup" aria-label="WhatsApp conversation connected to calendar">
+        <div className="operator-stage" aria-label="Conversación de WhatsApp convertida en turno">
+          <div className="stage-orbit" aria-hidden="true" />
+          <div className="signal-line primary" aria-hidden="true" />
+          <div className="signal-line secondary" aria-hidden="true" />
+
           <div className="mock-phone">
             <div className="mock-phone-top">
               <span className="status-dot" />
-              <span>Momentum on WhatsApp</span>
+              <span>Momentum en WhatsApp</span>
             </div>
             <div className="message-stack">
-              <p className="message inbound">Hola, quiero consultar por Botox para esta semana.</p>
+              <p className="message inbound">Hola, quiero consultar por botox esta semana.</p>
               <p className="message outbound">
-                Tengo disponibilidad real con Dra. Mora el jueves 17:30 o viernes 10:00.
+                Puedo ayudarte. Para primera consulta tengo jueves 17:30 o viernes 10:00 con Dra.
+                Mora.
               </p>
               <p className="message inbound">Jueves 17:30 me sirve.</p>
-              <p className="message outbound strong">Turno confirmado. Te mando recordatorio 24h antes.</p>
+              <p className="message outbound strong">Turno confirmado. Te recuerdo 24 h antes.</p>
             </div>
           </div>
-          <div className="mock-calendar">
-            <div className="calendar-head">
-              <span>Clinic agenda</span>
+
+          <div className="intent-panel">
+            <p className="panel-kicker">Intención detectada</p>
+            <strong>Consulta estética</strong>
+            <span>Urgencia: esta semana</span>
+            <span>Servicio: botox</span>
+            <span>Estado: lista para reservar</span>
+          </div>
+
+          <div className="booking-card">
+            <div className="booking-card-head">
+              <span>Agenda real</span>
               <strong>17:30</strong>
             </div>
-            <div className="calendar-row muted-row">
+            <div className="booking-row muted-row">
               <span>16:45</span>
               <span>Control facial</span>
             </div>
-            <div className="calendar-row active-row">
+            <div className="booking-row active-row">
               <span>17:30</span>
-              <span>Botox consultation</span>
+              <span>Consulta botox</span>
             </div>
-            <div className="calendar-row">
+            <div className="booking-row">
               <span>18:15</span>
-              <span>Available slot</span>
+              <span>Hueco disponible</span>
             </div>
           </div>
         </div>
@@ -106,35 +142,30 @@ export default function HomePage() {
 
       <section className="problem-section section-band">
         <div>
-          <p className="eyebrow">The leak</p>
-          <h2>Every unanswered WhatsApp is demand cooling down.</h2>
+          <p className="eyebrow">La fuga invisible</p>
+          <h2>El paciente no espera a que recepción tenga tiempo.</h2>
         </div>
         <div className="problem-grid">
-          <article className="feature-card">
-            <Clock3 aria-hidden="true" />
-            <h3>Speed decides intent</h3>
-            <p>Patients message several clinics, compare replies, and book where the path is clear.</p>
-          </article>
-          <article className="feature-card">
-            <MessageCircle aria-hidden="true" />
-            <h3>Chats become manual work</h3>
-            <p>Reception jumps between questions, pricing, availability, reminders, and follow-ups.</p>
-          </article>
-          <article className="feature-card">
-            <Sparkles aria-hidden="true" />
-            <h3>Warm demand gets forgotten</h3>
-            <p>Old conversations and freed slots can produce visits, but they rarely get chased.</p>
-          </article>
+          {problemCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <article className="feature-card" key={card.title}>
+                <Icon aria-hidden="true" />
+                <h3>{card.title}</h3>
+                <p>{card.body}</p>
+              </article>
+            );
+          })}
         </div>
       </section>
 
       <section id="flow" className="flow-section section-band">
         <div className="section-heading">
-          <p className="eyebrow">Operator flow</p>
-          <h2>Not a chatbot. A booking operator for aesthetic clinics.</h2>
+          <p className="eyebrow">Flujo operativo</p>
+          <h2>No es un bot genérico. Es un operador entrenado para convertir demanda real en agenda real.</h2>
           <p>
-            Momentum is built around the operational path from first WhatsApp message to confirmed
-            appointment, not around generic automation scripts.
+            Momentum acompaña el camino completo desde el primer mensaje hasta el turno confirmado,
+            con reglas, agenda y derivación humana cuando corresponde.
           </p>
         </div>
         <div className="flow-grid">
@@ -153,14 +184,14 @@ export default function HomePage() {
 
       <section className="automation-section section-band">
         <div className="automation-panel">
-          <p className="eyebrow">Automation surface</p>
-          <h2>Agenda real. Conversations reales. Turnos confirmados.</h2>
+          <p className="eyebrow">Superficie de automatización</p>
+          <h2>Agenda real. Conversaciones reales. Turnos confirmados.</h2>
           <p>
-            One connected operator covers the repeated work around appointments while your team
-            keeps control over services, policies, exceptions, and launch readiness.
+            Un operador conectado cubre el trabajo repetido alrededor de los turnos mientras tu
+            equipo mantiene control sobre servicios, políticas y excepciones.
           </p>
         </div>
-        <div className="automation-list" aria-label="Momentum automation capabilities">
+        <div className="automation-list" aria-label="Automatizaciones de Momentum">
           {automations.map((item) => (
             <span key={item}>{item}</span>
           ))}
@@ -169,11 +200,11 @@ export default function HomePage() {
 
       <section className="trust-section section-band">
         <div className="section-heading">
-          <p className="eyebrow">Control layer</p>
-          <h2>Your calendar stays the source of truth.</h2>
+          <p className="eyebrow">Capa de control</p>
+          <h2>Tu calendario sigue siendo la fuente de verdad.</h2>
           <p>
-            Momentum books only against the clinic agenda, respects handoff rules, and launches with
-            assisted activation instead of unmanaged self-serve automation.
+            Momentum reserva sólo contra la agenda conectada, respeta reglas de derivación y se
+            activa con revisión asistida antes de operar en producción.
           </p>
         </div>
         <div className="trust-grid">
@@ -190,14 +221,14 @@ export default function HomePage() {
       </section>
 
       <section className="final-cta section-band">
-        <p className="eyebrow">Assisted pilot</p>
-        <h2>Start with a reviewed clinic setup, then activate with confidence.</h2>
+        <p className="eyebrow">Piloto asistido</p>
+        <h2>Empezá con un piloto asistido.</h2>
         <p>
-          Share your clinic details and we will evaluate fit, setup needs, and the fastest route to a
-          controlled Momentum pilot.
+          Revisamos tu clínica, tu agenda y tus reglas antes de activar una experiencia controlada
+          con pacientes reales.
         </p>
         <a className="primary-link" href="/lead">
-          Apply for a pilot
+          Solicitar revisión
         </a>
       </section>
     </main>
