@@ -124,7 +124,7 @@ describe("OnboardingTestModeService", () => {
 });
 
 describe("onboarding test mode route", () => {
-  it("requires admin auth and runs with default test identifiers when the test mode service is provided", async () => {
+  it("requires admin auth and runs with generated default test identifiers when the test mode service is provided", async () => {
     const context = await buildContext();
     const app = buildApp({
       onboarding: {
@@ -158,14 +158,66 @@ describe("onboarding test mode route", () => {
         text: expect.stringContaining("Tengo este horario")
       })
     });
-    expect(context.operational.getConversation({ clinicId: "clinic_setup", conversationId: "test:clinic_setup" })).toEqual(
+    const conversations = context.operational.listConversationsByClinic("clinic_setup");
+    expect(conversations).toHaveLength(1);
+    expect(conversations[0]).toEqual(
       expect.objectContaining({
-        patientId: "test_patient:clinic_setup"
+        id: expect.stringMatching(/^test:clinic_setup:/),
+        patientId: expect.stringMatching(/^test_patient:clinic_setup:/)
       })
     );
     await expect(context.onboarding.getClinicSetup("clinic_setup")).resolves.toEqual(
       expect.objectContaining({ testConversationPassed: true })
     );
+    await app.close();
+  });
+
+  it("generates fresh default test identities for repeated browser runs", async () => {
+    const context = await buildContext();
+    const receivedInputs: Array<{
+      conversationId: string;
+      patientId: string;
+      whatsappNumber: string;
+    }> = [];
+    const app = buildApp({
+      onboarding: {
+        adminToken: "secret",
+        service: context.onboardingService,
+        testModeService: {
+          runMessage: async (input) => {
+            receivedInputs.push({
+              conversationId: input.conversationId,
+              patientId: input.patientId,
+              whatsappNumber: input.whatsappNumber
+            });
+            return { kind: "reply", text: "Tengo este horario: 2026-06-01T13:00:00.000Z" };
+          }
+        }
+      }
+    });
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/internal/onboarding/clinics/clinic_setup/test-message",
+      headers: { authorization: "Bearer secret" },
+      payload: { text: "Quiero reservar botox" }
+    });
+    const second = await app.inject({
+      method: "POST",
+      url: "/internal/onboarding/clinics/clinic_setup/test-message",
+      headers: { authorization: "Bearer secret" },
+      payload: { text: "Quiero reservar botox" }
+    });
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(receivedInputs).toHaveLength(2);
+    expect(receivedInputs[0].conversationId).toMatch(/^test:clinic_setup:/);
+    expect(receivedInputs[0].patientId).toMatch(/^test_patient:clinic_setup:/);
+    expect(receivedInputs[0].whatsappNumber).toMatch(/^\+549000\d+$/);
+    expect(receivedInputs[1].conversationId).not.toBe(receivedInputs[0].conversationId);
+    expect(receivedInputs[1].patientId).not.toBe(receivedInputs[0].patientId);
+    expect(receivedInputs[1].whatsappNumber).not.toBe(receivedInputs[0].whatsappNumber);
     await app.close();
   });
 

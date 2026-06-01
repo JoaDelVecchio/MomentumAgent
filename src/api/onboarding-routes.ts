@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { randomInt, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { OnboardingService } from "../application/onboarding/onboarding-service.js";
 import {
@@ -250,11 +251,12 @@ export function registerOnboardingRoutes(app: FastifyInstance, options: Onboardi
 
       const { clinicId } = params.data;
       try {
+        const defaultIdentity = buildDefaultTestIdentity(clinicId);
         const result = await testModeService.runMessage({
           clinicId,
-          conversationId: body.data.conversationId ?? `test:${clinicId}`,
-          patientId: body.data.patientId ?? `test_patient:${clinicId}`,
-          whatsappNumber: body.data.whatsappNumber ?? "+5490000000000",
+          conversationId: body.data.conversationId ?? defaultIdentity.conversationId,
+          patientId: body.data.patientId ?? defaultIdentity.patientId,
+          whatsappNumber: body.data.whatsappNumber ?? defaultIdentity.whatsappNumber,
           text: body.data.text
         });
         return reply.send({ result });
@@ -324,6 +326,15 @@ export function registerOnboardingRoutes(app: FastifyInstance, options: Onboardi
       throw error;
     }
   });
+}
+
+function buildDefaultTestIdentity(clinicId: string) {
+  const runId = randomUUID();
+  return {
+    conversationId: `test:${clinicId}:${runId}`,
+    patientId: `test_patient:${clinicId}:${runId}`,
+    whatsappNumber: `+549000${Date.now()}${randomInt(100000, 1000000)}`
+  };
 }
 
 function isNotFoundError(error: unknown): boolean {
