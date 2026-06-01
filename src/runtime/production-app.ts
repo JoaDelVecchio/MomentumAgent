@@ -11,6 +11,7 @@ import { GoogleCalendarOnboardingService } from "../application/onboarding/googl
 import { OnboardingService } from "../application/onboarding/onboarding-service.js";
 import { OnboardingTestModeService } from "../application/onboarding/test-mode-service.js";
 import { readAdminConfig } from "../config/admin.js";
+import { readAIConfig } from "../config/ai.js";
 import { optionalEnv } from "../config/env.js";
 import { readOutboundConfig } from "../config/outbound.js";
 import {
@@ -22,6 +23,7 @@ import {
 import { readWhatsAppConfig } from "../config/whatsapp.js";
 import { buildDefaultCalendar, type CalendarProvider } from "../dev/seed.js";
 import {
+  buildConversationInterpreter,
   buildGoogleCalendarRuntime,
   buildWhatsAppRuntime,
   needsOnboardingRuntime,
@@ -47,6 +49,7 @@ export async function createProductionAppRuntime(
   const databaseUrl = readDatabaseUrl(env);
   if (databaseUrl) {
     env.DATABASE_URL = databaseUrl;
+    process.env.DATABASE_URL = databaseUrl;
   }
   const logger = new ConsoleLogger();
 
@@ -71,6 +74,7 @@ export async function createProductionAppRuntime(
     adminEnabled: adminConfig.enabled,
     publicWebhookUrl: whatsappConfig.provider === "kapso" ? whatsappConfig.publicWebhookUrl : undefined
   });
+  const conversationInterpreter = buildConversationInterpreter(readAIConfig(env));
   const onboardingRuntimeNeeded = needsOnboardingRuntime({
     adminEnabled: adminConfig.enabled,
     whatsappProvider: whatsappConfig.provider,
@@ -115,7 +119,8 @@ export async function createProductionAppRuntime(
             onboarding: new PrismaOnboardingRepository(requirePrisma(sharedPrisma)),
             operational: new PrismaOperationalRepository(requirePrisma(sharedPrisma)),
             audit: new PrismaAuditLog(requirePrisma(sharedPrisma)),
-            calendar: googleRuntime?.calendar ?? buildDefaultCalendar(calendarProvider)
+            calendar: googleRuntime?.calendar ?? buildDefaultCalendar(calendarProvider),
+            interpreter: conversationInterpreter
           })
         : undefined;
     const conversationControl =

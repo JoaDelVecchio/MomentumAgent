@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createProductionAppRuntime } from "../src/runtime/production-app.js";
+import { createPrismaTestContext } from "./helpers/prisma.js";
 
 describe("production app runtime", () => {
   afterEach(() => {
@@ -34,9 +35,10 @@ describe("production app runtime", () => {
   });
 
   it("registers onboarding test mode when admin routes are enabled", async () => {
+    const context = createPrismaTestContext("momentum-production-runtime-");
     const runtime = await createProductionAppRuntime({
       ...process.env,
-      DATABASE_URL: "file:./dev.db",
+      DATABASE_URL: `file:${context.databasePath}`,
       CALENDAR_PROVIDER: "fake",
       WHATSAPP_PROVIDER: "",
       MOMENTUM_ADMIN_TOKEN: "admin_test_token",
@@ -56,10 +58,48 @@ describe("production app runtime", () => {
       }
     });
 
-    expect(response.statusCode).toBe(404);
-    expect(response.json()).toEqual({ error: "not_found" });
+    try {
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toEqual({ error: "not_found" });
+    } finally {
+      await runtime.close();
+      await context.cleanup();
+    }
+  });
 
-    await runtime.close();
+  it("starts production app with OpenAI interpreter configured for admin test mode", async () => {
+    const context = createPrismaTestContext("momentum-production-runtime-openai-");
+    const runtime = await createProductionAppRuntime({
+      ...process.env,
+      DATABASE_URL: `file:${context.databasePath}`,
+      CALENDAR_PROVIDER: "fake",
+      WHATSAPP_PROVIDER: "",
+      MOMENTUM_ADMIN_TOKEN: "admin-secret",
+      OUTBOUND_AUTOMATION_TOKEN: "",
+      ENABLE_SIMULATION_API: "false",
+      MOMENTUM_RUNTIME_ENV: "development",
+      AI_INTERPRETER_PROVIDER: "openai",
+      OPENAI_API_KEY: "sk-test",
+      OPENAI_MODEL: "gpt-5-mini"
+    });
+
+    const response = await runtime.app.inject({
+      method: "POST",
+      url: "/internal/onboarding/clinics/clinic_unconfigured_for_route/test-message",
+      headers: {
+        authorization: "Bearer admin-secret"
+      },
+      payload: {
+        text: "Hola"
+      }
+    });
+
+    try {
+      expect(response.statusCode).toBe(404);
+    } finally {
+      await runtime.close();
+      await context.cleanup();
+    }
   });
 
   it("disconnects Prisma if setup fails after creating the shared client", async () => {

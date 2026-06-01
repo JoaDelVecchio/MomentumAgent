@@ -12,6 +12,7 @@ import {
 import { PrismaOperationalRepository } from "../adapters/prisma/operational-repository.js";
 import { KapsoWhatsAppProvider } from "../adapters/whatsapp/kapso/kapso-whatsapp-provider.js";
 import { ConversationWorkflow } from "../application/conversations/conversation-workflow.js";
+import { FallbackConversationInterpreter } from "../application/conversations/fallback-interpreter.js";
 import type { ConversationInterpreter } from "../application/conversations/interpreter.js";
 import { RulesConversationInterpreter } from "../application/conversations/rules-interpreter.js";
 import { OutboundTemplateService } from "../application/messaging/outbound-template-service.js";
@@ -133,16 +134,19 @@ export async function buildWhatsAppRuntime(input: {
   };
 }
 
-function buildConversationInterpreter(config: AIConfig): ConversationInterpreter {
+export function buildConversationInterpreter(config: AIConfig): ConversationInterpreter {
   if (config.provider === "rules") {
     return new RulesConversationInterpreter();
   }
 
-  return new OpenAIConversationInterpreter({
-    client: new OpenAI({ apiKey: config.apiKey }),
-    model: config.model,
-    timeoutMs: config.timeoutMs
-  });
+  return new FallbackConversationInterpreter(
+    new OpenAIConversationInterpreter({
+      client: new OpenAI({ apiKey: config.apiKey }),
+      model: config.model,
+      timeoutMs: config.timeoutMs
+    }),
+    new RulesConversationInterpreter()
+  );
 }
 
 export function readRuntimeClinicId(env: NodeJS.ProcessEnv = process.env) {
