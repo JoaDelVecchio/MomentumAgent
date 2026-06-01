@@ -33,8 +33,9 @@ function buildContext() {
     })
   );
 
-  const scheduling = new SchedulingService(repos, calendar, audit);
-  const workflow = new ConversationWorkflow(repos, scheduling, audit, () => new Date("2026-05-29T12:00:00.000Z"));
+  const now = () => new Date("2026-05-29T12:00:00.000Z");
+  const scheduling = new SchedulingService(repos, calendar, audit, now);
+  const workflow = new ConversationWorkflow(repos, scheduling, audit, now);
 
   return { repos, calendar, audit, workflow };
 }

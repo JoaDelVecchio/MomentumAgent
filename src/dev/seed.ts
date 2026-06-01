@@ -37,7 +37,7 @@ export function buildDevContainer(options: BuildDevContainerOptions = {}) {
     ]);
   }
 
-  const scheduling = new SchedulingService(repos, calendar, audit);
+  const scheduling = new SchedulingService(repos, calendar, audit, () => now);
   const workflow = new ConversationWorkflow(repos, scheduling, audit, () => now);
 
   return { repos, calendar, audit, scheduling, workflow };
