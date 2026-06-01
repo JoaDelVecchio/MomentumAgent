@@ -79,6 +79,11 @@ export class ConversationWorkflow {
       return await this.pauseForHandoff(input);
     }
 
+    const pendingBookingFaqResult = await this.tryAnswerPendingBookingQuestion(input, conversation, intent);
+    if (pendingBookingFaqResult) {
+      return pendingBookingFaqResult;
+    }
+
     const pendingDataResult = await this.tryCompletePendingPatientData(input, conversation, intent);
     if (pendingDataResult) {
       return pendingDataResult;
@@ -114,7 +119,7 @@ export class ConversationWorkflow {
       if (faq) {
         return { kind: "reply", text: faq };
       }
-      if (hasRequestedFaqTopic(intent)) {
+      if (hasRequestedFaqTopic(intent) && !isMissingServiceForServiceFact(intent)) {
         return { kind: "reply", text: missingConfiguredFaqResponse };
       }
     }
@@ -298,6 +303,28 @@ export class ConversationWorkflow {
     }
   }
 
+  private async tryAnswerPendingBookingQuestion(
+    input: InboundMessage,
+    conversation: Conversation,
+    intent: ConversationUnderstanding
+  ): Promise<WorkflowResult | undefined> {
+    if (!conversation.pendingBooking || intent.intent !== "question" || !hasRequestedFaqTopic(intent)) {
+      return undefined;
+    }
+
+    const profile = await this.repos.getClinicProfile(input.clinicId);
+    const service = profile?.services.find((candidate) => candidate.id === conversation.pendingBooking?.serviceId);
+    const response = buildFaqResponse(profile, {
+      ...intent,
+      serviceName: intent.serviceName ?? service?.name
+    });
+
+    return {
+      kind: "reply",
+      text: response ?? missingConfiguredFaqResponse
+    };
+  }
+
   private async tryCompletePendingPatientData(
     input: InboundMessage,
     conversation: Conversation,
@@ -458,6 +485,16 @@ function buildBookingFaqPrefix(profile: Parameters<typeof buildFaqResponse>[0], 
   }
 
   return `${buildFaqResponse(profile, intent) ?? missingConfiguredFaqResponse} `;
+}
+
+function isMissingServiceForServiceFact(intent: ConversationUnderstanding) {
+  if (intent.serviceName) {
+    return false;
+  }
+
+  return intent.requestedTopics.some(
+    (topic) => topic === "price" || topic === "duration" || topic === "preparation" || topic === "restrictions"
+  );
 }
 
 function hasMedicalSafetyLanguage(text: string) {

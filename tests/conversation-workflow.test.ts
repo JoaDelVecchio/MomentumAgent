@@ -120,6 +120,40 @@ describe("ConversationWorkflow", () => {
     ]);
   });
 
+  it("answers service questions during a pending booking without confirming or losing the slot", async () => {
+    const { calendar, repos, workflow } = buildContext();
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
+    ]);
+
+    await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Quiero reservar botox"
+    });
+    const pendingBooking = repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking;
+
+    const result = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "cuanto vale"
+    });
+
+    expect(result).toEqual({
+      kind: "reply",
+      text: "Botox: precio Desde $120.000."
+    });
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual(
+      pendingBooking
+    );
+    expect(repos.getPatient("pat_1")?.fullName).toBeUndefined();
+    expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
+  });
+
   it("confirms immediately when required patient data already exists", async () => {
     const { calendar, repos, workflow } = buildContext();
     repos.upsertPatient({ id: "pat_1", whatsappNumber: "+5491111111111", fullName: "Ana Gomez" });

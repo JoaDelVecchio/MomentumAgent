@@ -531,7 +531,8 @@ describe("SchedulingService", () => {
   });
 
   it("keeps appointment ids unique across service instances sharing a repository", async () => {
-    const { repos, calendar, audit, service } = buildContext();
+    const now = () => new Date("2026-05-29T12:00:00.000Z");
+    const { repos, calendar, audit, service } = buildContext(new FakeCalendar(), now);
     calendar.seedAvailability("cal_perez", [
       { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") },
       { startsAt: new Date("2026-06-01T13:30:00.000Z"), endsAt: new Date("2026-06-01T14:00:00.000Z") }
@@ -544,7 +545,7 @@ describe("SchedulingService", () => {
       startsAt: new Date("2026-06-01T13:00:00.000Z"),
       professionalId: "pro_perez"
     });
-    const rebuiltService = new SchedulingService(repos, calendar, audit);
+    const rebuiltService = new SchedulingService(repos, calendar, audit, now);
     const second = await rebuiltService.bookAppointment({
       clinicId: "clinic_1",
       patientId: "pat_1",
