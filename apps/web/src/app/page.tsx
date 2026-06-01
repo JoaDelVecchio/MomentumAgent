@@ -106,85 +106,114 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="product-theater" aria-label="Sistema Momentum convirtiendo WhatsApp en turno">
-          <div className="momentum-os">
-            <div className="os-topbar">
-              <div className="window-controls" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </div>
-              <span>Momentum Live Desk</span>
-              <strong>turno confirmado</strong>
+        <div className="product-theater whatsapp-theater" aria-label="Agente Momentum operando en WhatsApp">
+          <div className="whatsapp-stage">
+            <div className="whatsapp-browser-bar" aria-hidden="true">
+              <span className="browser-controls">
+                <i />
+                <i />
+                <i />
+              </span>
+              <strong>web.whatsapp.com</strong>
+              <span>Agente activo</span>
             </div>
-
-            <div className="os-grid">
-              <aside className="inbox-panel" aria-label="WhatsApp entrante">
-                <div className="panel-head">
-                  <span>WhatsApp</span>
-                  <strong>3 nuevos</strong>
+            <section className="whatsapp-web" aria-label="WhatsApp Web con agente Momentum">
+              <aside className="whatsapp-sidebar" aria-label="Lista de chats de WhatsApp">
+                <div className="whatsapp-sidebar-head">
+                  <div className="clinic-avatar">A</div>
+                  <div>
+                    <span>Clínica Aura</span>
+                    <strong>WhatsApp conectado</strong>
+                  </div>
+                  <div className="whatsapp-icons" aria-hidden="true">
+                    <span />
+                    <span />
+                  </div>
                 </div>
-                <div className="inbox-thread active-thread">
-                  <span>Camila R.</span>
-                  <p>Hola, quiero consultar por botox esta semana.</p>
+                <div className="whatsapp-search">Buscar o empezar un chat</div>
+                <div className="whatsapp-filter-row" aria-hidden="true">
+                  <span className="active">Todos</span>
+                  <span>No leídos</span>
                 </div>
-                <div className="inbox-thread">
-                  <span>Lucía M.</span>
-                  <p>Necesito reprogramar mi limpieza facial.</p>
+                <div className="whatsapp-chat-row active">
+                  <div className="wa-avatar">C</div>
+                  <div>
+                    <span>Camila R.</span>
+                    <p>Jueves 17:30 me sirve.</p>
+                  </div>
+                  <time>10:15</time>
                 </div>
-                <div className="inbox-thread">
-                  <span>Sofía P.</span>
-                  <p>¿Tienen lugar hoy para evaluación?</p>
+                <div className="whatsapp-chat-row">
+                  <div className="wa-avatar muted">L</div>
+                  <div>
+                    <span>Lucía M.</span>
+                    <p>Necesito reprogramar mi limpieza.</p>
+                  </div>
+                  <time>9:48</time>
+                </div>
+                <div className="whatsapp-chat-row">
+                  <div className="wa-avatar muted">S</div>
+                  <div>
+                    <span>Sofía P.</span>
+                    <p>¿Tienen evaluación hoy?</p>
+                  </div>
+                  <time>9:31</time>
                 </div>
               </aside>
 
-              <section className="operator-panel" aria-label="Decisión operativa Momentum">
-                <div className="live-badge">
-                  <Sparkles aria-hidden="true" />
-                  Analizando intención
-                </div>
-                <div className="intent-card">
-                  <span>Servicio</span>
-                  <strong>Consulta botox</strong>
-                </div>
-                <div className="intent-card two">
-                  <span>Urgencia</span>
-                  <strong>Esta semana</strong>
-                </div>
-                <div className="intent-card three">
-                  <span>Estado</span>
-                  <strong>Lista para reservar</strong>
-                </div>
-                <div className="route-pulse" aria-hidden="true" />
-              </section>
+              <section className="whatsapp-conversation" aria-label="Conversación real del agente">
+                <header className="whatsapp-header">
+                  <div className="wa-avatar">C</div>
+                  <div>
+                    <span>Camila R.</span>
+                    <p>online · paciente nuevo</p>
+                  </div>
+                  <span className="whatsapp-header-action" aria-hidden="true">
+                    Momentum IA
+                  </span>
+                </header>
 
-              <aside className="agenda-panel" aria-label="Agenda conectada">
-                <div className="panel-head">
+                <div className="whatsapp-thread">
+                  <div className="whatsapp-date">Hoy</div>
+                  <div className="whatsapp-message inbound">
+                    <p>Hola! Quería saber si tienen turno para botox esta semana.</p>
+                    <time>10:14</time>
+                  </div>
+                  <div className="whatsapp-message outbound agent-response">
+                    <p>
+                      Hola Camila, soy el asistente de Clínica Aura. Tengo jueves 17:30 o viernes
+                      12:00 para evaluación. ¿Cuál preferís?
+                    </p>
+                    <time>
+                      10:14 <span>✓✓</span>
+                    </time>
+                  </div>
+                  <div className="whatsapp-message inbound">
+                    <p>Jueves 17:30 me sirve.</p>
+                    <time>10:15</time>
+                  </div>
+                  <div className="whatsapp-message outbound confirmed">
+                    <p>
+                      Listo, te reservé jueves 17:30 con la Dra. Mora. Te escribo 24 h antes para
+                      confirmar.
+                    </p>
+                    <time>
+                      10:15 <span>✓✓</span>
+                    </time>
+                  </div>
+                </div>
+
+                <div className="whatsapp-agent-toast" aria-label="Acción del agente en agenda">
                   <span>Agenda real</span>
-                  <strong>Jueves</strong>
+                  <strong>Turno creado · jue 17:30</strong>
                 </div>
-                <div className="agenda-row muted-row">
-                  <span>16:45</span>
-                  <p>Control facial</p>
-                </div>
-                <div className="agenda-row locked-row">
-                  <span>17:30</span>
-                  <p>Consulta botox</p>
-                </div>
-                <div className="agenda-row">
-                  <span>18:15</span>
-                  <p>Disponible</p>
-                </div>
-              </aside>
-            </div>
-          </div>
 
-          <div className="command-deck" aria-label="Comando automatizado">
-            <div>
-              <span>Respuesta enviada</span>
-              <strong>Jueves 17:30 confirmado</strong>
-            </div>
-            <p>Recordatorio 24 h antes + derivación si cambia el tratamiento.</p>
+                <div className="whatsapp-composer" aria-label="Campo de mensaje de WhatsApp">
+                  <span>Mensaje</span>
+                  <strong>Momentum responde automáticamente</strong>
+                </div>
+              </section>
+            </section>
           </div>
         </div>
       </section>
