@@ -22,8 +22,8 @@ describe("OnboardingTestModeService", () => {
 
     const result = await context.testModeService.runMessage({
       clinicId: "clinic_setup",
-      conversationId: "test:clinic_setup",
-      patientId: "test_patient:clinic_setup",
+      conversationId: "test:clinic_setup:booking",
+      patientId: "test_patient:clinic_setup:booking",
       whatsappNumber: "+5490000000000",
       text: "Quiero reservar botox"
     });
@@ -45,8 +45,8 @@ describe("OnboardingTestModeService", () => {
 
     const result = await context.testModeService.runMessage({
       clinicId: "clinic_setup",
-      conversationId: "test:clinic_setup",
-      patientId: "test_patient:clinic_setup",
+      conversationId: "test:clinic_setup:handoff",
+      patientId: "test_patient:clinic_setup:handoff",
       whatsappNumber: "+5490000000000",
       text: "Quiero hablar con una persona"
     });
@@ -64,7 +64,7 @@ describe("OnboardingTestModeService", () => {
       context.testModeService.runMessage({
         clinicId: "clinic_setup",
         conversationId: "prod_conversation",
-        patientId: "test_patient:clinic_setup",
+        patientId: "test_patient:clinic_setup:unsafe",
         whatsappNumber: "+5490000000000",
         text: "Quiero reservar botox"
       })
@@ -72,7 +72,7 @@ describe("OnboardingTestModeService", () => {
     await expect(
       context.testModeService.runMessage({
         clinicId: "clinic_setup",
-        conversationId: "test:clinic_setup",
+        conversationId: "test:clinic_setup:unsafe",
         patientId: "prod_patient",
         whatsappNumber: "+5490000000000",
         text: "Quiero reservar botox"
@@ -81,9 +81,32 @@ describe("OnboardingTestModeService", () => {
     await expect(
       context.testModeService.runMessage({
         clinicId: "clinic_setup",
-        conversationId: "test:clinic_setup",
-        patientId: "test_patient:clinic_setup",
+        conversationId: "test:clinic_setup:unsafe",
+        patientId: "test_patient:clinic_setup:unsafe",
         whatsappNumber: "+5491111111111",
+        text: "Quiero reservar botox"
+      })
+    ).rejects.toMatchObject({ code: "unsafe_test_identity" });
+  });
+
+  it("rejects test identities scoped to a different clinic", async () => {
+    const context = await buildContext();
+
+    await expect(
+      context.testModeService.runMessage({
+        clinicId: "clinic_setup",
+        conversationId: "test:clinic_other:session",
+        patientId: "test_patient:clinic_setup:session",
+        whatsappNumber: "+5490000000000",
+        text: "Quiero reservar botox"
+      })
+    ).rejects.toMatchObject({ code: "unsafe_test_identity" });
+    await expect(
+      context.testModeService.runMessage({
+        clinicId: "clinic_setup",
+        conversationId: "test:clinic_setup:session",
+        patientId: "test_patient:clinic_other:session",
+        whatsappNumber: "+5490000000000",
         text: "Quiero reservar botox"
       })
     ).rejects.toMatchObject({ code: "unsafe_test_identity" });
@@ -96,8 +119,8 @@ describe("OnboardingTestModeService", () => {
     ]);
     const input = {
       clinicId: "clinic_setup",
-      conversationId: "test:clinic_setup",
-      patientId: "test_patient:clinic_setup",
+      conversationId: "test:clinic_setup:dry-run",
+      patientId: "test_patient:clinic_setup:dry-run",
       whatsappNumber: "+5490000000000"
     };
 
@@ -116,13 +139,13 @@ describe("OnboardingTestModeService", () => {
     await expect(context.onboarding.getClinicSetup("clinic_setup")).resolves.toEqual(
       expect.objectContaining({ testConversationPassed: false })
     );
-    expect(context.operational.listAppointmentsByPatient("test_patient:clinic_setup")).toEqual([]);
+    expect(context.operational.listAppointmentsByPatient("test_patient:clinic_setup:dry-run")).toEqual([]);
     await expect(context.calendar.getEvent("evt_1", "cal_perez")).resolves.toBeUndefined();
     expect(context.operational.getPatient("prod_patient")).toBeUndefined();
     expect(context.operational.listConversationsByClinic("clinic_setup")).toEqual([
       expect.objectContaining({
-        id: "test:clinic_setup",
-        patientId: "test_patient:clinic_setup"
+        id: "test:clinic_setup:dry-run",
+        patientId: "test_patient:clinic_setup:dry-run"
       })
     ]);
   });
@@ -269,7 +292,7 @@ describe("onboarding test mode route", () => {
       payload: {
         text: "Quiero reservar botox",
         conversationId: "prod_conversation",
-        patientId: "test_patient:clinic_setup",
+        patientId: "test_patient:clinic_setup:unsafe-route",
         whatsappNumber: "+5490000000000"
       }
     });

@@ -84,8 +84,8 @@ export class OnboardingTestModeService {
 
   private assertSafeTestIdentity(input: OnboardingTestModeMessageInput): void {
     if (
-      !input.conversationId.startsWith("test:") ||
-      !input.patientId.startsWith("test_patient:") ||
+      !input.conversationId.startsWith(`test:${input.clinicId}:`) ||
+      !input.patientId.startsWith(`test_patient:${input.clinicId}:`) ||
       !input.whatsappNumber.startsWith("+549000")
     ) {
       throw new OnboardingTestModeError(
