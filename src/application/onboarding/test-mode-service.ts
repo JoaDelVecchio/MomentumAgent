@@ -10,6 +10,7 @@ import {
 import type { OnboardingRepository } from "../../ports/onboarding.js";
 import type { OperationalRepository } from "../../ports/repositories.js";
 import { ConversationWorkflow, type WorkflowResult } from "../conversations/conversation-workflow.js";
+import type { ConversationInterpreter } from "../conversations/interpreter.js";
 import { RulesConversationInterpreter } from "../conversations/rules-interpreter.js";
 import { SchedulingService } from "../scheduling/scheduling-service.js";
 
@@ -19,6 +20,7 @@ export type OnboardingTestModeServiceOptions = {
   audit: AuditLogPort;
   calendar: CalendarPort;
   now?: () => Date;
+  interpreter?: ConversationInterpreter;
 };
 
 export type OnboardingTestModeMessageInput = {
@@ -61,7 +63,7 @@ export class OnboardingTestModeService {
       scheduling,
       options.audit,
       this.now,
-      new RulesConversationInterpreter()
+      options.interpreter ?? new RulesConversationInterpreter()
     );
   }
 

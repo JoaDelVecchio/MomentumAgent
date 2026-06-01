@@ -4,6 +4,11 @@ import { FakeCalendar } from "../src/adapters/memory/fake-calendar.js";
 import { InMemoryOnboardingRepository } from "../src/adapters/memory/onboarding-repository.js";
 import { InMemoryRepositories } from "../src/adapters/memory/repositories.js";
 import { buildApp } from "../src/api/app.js";
+import type {
+  ConversationInterpreter,
+  ConversationInterpreterInput,
+  ConversationUnderstanding
+} from "../src/application/conversations/interpreter.js";
 import { OnboardingService } from "../src/application/onboarding/onboarding-service.js";
 import { OnboardingTestModeService } from "../src/application/onboarding/test-mode-service.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
@@ -120,6 +125,32 @@ describe("OnboardingTestModeService", () => {
         patientId: "test_patient:clinic_setup"
       })
     ]);
+  });
+
+  it("uses an injected interpreter for test mode messages", async () => {
+    const context = await buildContext({
+      interpreter: new FixedInterpreter({
+        provider: "rules",
+        intent: "question",
+        confidence: 0.99,
+        requestedTopics: [],
+        requiresHuman: false,
+        reason: "Forced question intent."
+      })
+    });
+
+    const result = await context.testModeService.runMessage({
+      clinicId: "clinic_setup",
+      conversationId: "test:clinic_setup:interpreter",
+      patientId: "test_patient:clinic_setup:interpreter",
+      whatsappNumber: "+5490001111111",
+      text: "Quiero reservar botox"
+    });
+
+    expect(result).toEqual({
+      kind: "reply",
+      text: "Te ayudo con informacion y turnos. Decime que tratamiento te interesa o si queres reservar, cancelar o cambiar un turno."
+    });
   });
 });
 
@@ -269,14 +300,21 @@ describe("onboarding test mode route", () => {
   });
 });
 
-async function buildContext() {
+async function buildContext(options: { interpreter?: ConversationInterpreter } = {}) {
   const onboarding = new InMemoryOnboardingRepository();
   const operational = new InMemoryRepositories();
   const audit = new InMemoryAuditLog();
   const calendar = new FakeCalendar();
   const now = () => new Date("2026-06-01T12:00:00.000Z");
   const onboardingService = new OnboardingService({ onboarding, operational, now });
-  const testModeService = new OnboardingTestModeService({ onboarding, operational, audit, calendar, now });
+  const testModeService = new OnboardingTestModeService({
+    onboarding,
+    operational,
+    audit,
+    calendar,
+    now,
+    interpreter: options.interpreter
+  });
 
   await onboardingService.createManualClinic({
     clinicId: "clinic_setup",
@@ -317,4 +355,15 @@ async function buildContext() {
   );
 
   return { onboarding, operational, audit, calendar, onboardingService, testModeService };
+}
+
+class FixedInterpreter implements ConversationInterpreter {
+  readonly inputs: ConversationInterpreterInput[] = [];
+
+  constructor(private readonly understanding: ConversationUnderstanding) {}
+
+  async interpret(input: ConversationInterpreterInput): Promise<ConversationUnderstanding> {
+    this.inputs.push(input);
+    return this.understanding;
+  }
 }
