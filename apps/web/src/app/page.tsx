@@ -117,7 +117,15 @@ export default function HomePage() {
               <strong>web.whatsapp.com</strong>
               <span>Agente activo</span>
             </div>
-            <section className="whatsapp-web" aria-label="WhatsApp Web con agente Momentum">
+            <section className="whatsapp-web real-whatsapp-shot" aria-label="WhatsApp Web con agente Momentum">
+              <aside className="whatsapp-rail" aria-hidden="true">
+                <span className="rail-icon active" />
+                <span className="rail-icon" />
+                <span className="rail-icon" />
+                <span className="rail-spacer" />
+                <span className="rail-avatar">A</span>
+              </aside>
+
               <aside className="whatsapp-sidebar" aria-label="Lista de chats de WhatsApp">
                 <div className="whatsapp-sidebar-head">
                   <div className="clinic-avatar">A</div>
@@ -130,18 +138,24 @@ export default function HomePage() {
                     <span />
                   </div>
                 </div>
-                <div className="whatsapp-search">Buscar o empezar un chat</div>
+                <div className="whatsapp-search">
+                  <span aria-hidden="true" />
+                  Buscar o empezar un chat
+                </div>
                 <div className="whatsapp-filter-row" aria-hidden="true">
                   <span className="active">Todos</span>
                   <span>No leídos</span>
+                  <span>Favoritos</span>
                 </div>
                 <div className="whatsapp-chat-row active">
                   <div className="wa-avatar">C</div>
                   <div>
                     <span>Camila R.</span>
-                    <p>Jueves 17:30 me sirve.</p>
+                    <p>
+                      <b>Momentum:</b> turno creado.
+                    </p>
                   </div>
-                  <time>10:15</time>
+                  <time>10:16</time>
                 </div>
                 <div className="whatsapp-chat-row">
                   <div className="wa-avatar muted">L</div>
@@ -166,10 +180,10 @@ export default function HomePage() {
                   <div className="wa-avatar">C</div>
                   <div>
                     <span>Camila R.</span>
-                    <p>online · paciente nuevo</p>
+                    <p>online</p>
                   </div>
                   <span className="whatsapp-header-action" aria-hidden="true">
-                    Momentum IA
+                    Momentum escucha
                   </span>
                 </header>
 
@@ -180,6 +194,7 @@ export default function HomePage() {
                     <time>10:14</time>
                   </div>
                   <div className="whatsapp-message outbound agent-response">
+                    <span className="agent-label">Asistente de Clínica Aura</span>
                     <p>
                       Hola Camila, soy el asistente de Clínica Aura. Tengo jueves 17:30 o viernes
                       12:00 para evaluación. ¿Cuál preferís?
@@ -193,6 +208,7 @@ export default function HomePage() {
                     <time>10:15</time>
                   </div>
                   <div className="whatsapp-message outbound confirmed">
+                    <span className="agent-label">Confirmación automática</span>
                     <p>
                       Listo, te reservé jueves 17:30 con la Dra. Mora. Te escribo 24 h antes para
                       confirmar.
@@ -203,13 +219,20 @@ export default function HomePage() {
                   </div>
                 </div>
 
+                <div className="whatsapp-agent-lens" aria-label="Lectura del agente Momentum">
+                  <span>Momentum</span>
+                  <strong>Intención: reservar botox</strong>
+                  <p>Acción: ofrece horarios reales y crea el turno.</p>
+                </div>
+
                 <div className="whatsapp-agent-toast" aria-label="Acción del agente en agenda">
-                  <span>Agenda real</span>
+                  <span>Agenda actualizada</span>
                   <strong>Turno creado · jue 17:30</strong>
                 </div>
 
                 <div className="whatsapp-composer" aria-label="Campo de mensaje de WhatsApp">
-                  <span>Mensaje</span>
+                  <span className="whatsapp-attach" aria-hidden="true">+</span>
+                  <span className="whatsapp-input">Mensaje</span>
                   <strong>Momentum responde automáticamente</strong>
                 </div>
               </section>

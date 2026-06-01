@@ -15,12 +15,15 @@ test("public landing uses Cluely-inspired Spanish product positioning", () => {
   assert.match(landing, /product-theater/);
   assert.match(landing, /whatsapp-stage/);
   assert.match(landing, /whatsapp-web/);
+  assert.match(landing, /real-whatsapp-shot/);
+  assert.match(landing, /whatsapp-rail/);
   assert.match(landing, /whatsapp-message/);
   assert.match(landing, /whatsapp-composer/);
   assert.match(landing, /whatsapp-browser-bar/);
   assert.match(landing, /web\.whatsapp\.com/);
   assert.match(landing, /WhatsApp conectado/);
-  assert.match(landing, /Momentum IA/);
+  assert.match(landing, /Momentum escucha/);
+  assert.match(landing, /Intención: reservar botox/);
   assert.match(landing, /soy el asistente de Clínica Aura/);
   assert.match(landing, /Turno creado · jue 17:30/);
   assert.doesNotMatch(landing, /La recepción IA que convierte WhatsApp en turnos confirmados\./);
@@ -59,7 +62,9 @@ test("public CSS uses a clean Cluely-style glass palette without the old grid tr
   assert.match(css, /\.whatsapp-stage/);
   assert.match(css, /\.whatsapp-browser-bar/);
   assert.match(css, /\.whatsapp-web/);
+  assert.match(css, /\.whatsapp-rail/);
   assert.match(css, /\.whatsapp-message/);
+  assert.match(css, /\.whatsapp-agent-lens/);
   assert.match(css, /\.whatsapp-agent-toast/);
   assert.match(css, /\.whatsapp-composer/);
   assert.match(css, /--page: #eef2f8;/);
@@ -69,6 +74,7 @@ test("public CSS uses a clean Cluely-style glass palette without the old grid tr
   assert.match(css, /@keyframes theaterReveal/);
   assert.match(css, /@keyframes messageIn/);
   assert.match(css, /@keyframes typingBlink/);
+  assert.match(css, /@keyframes lensFloat/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
   assert.doesNotMatch(css, /\.momentum-os|\.os-grid|\.operator-panel|\.agenda-panel/);
   assert.doesNotMatch(css, /\.chat-phone|\.chat-sidecar|\.booking-receipt|\.insight-card|\.command-deck/);
