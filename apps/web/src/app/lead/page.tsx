@@ -51,37 +51,37 @@ export default function LeadPage() {
         <a className="back-link" href="/">
           Momentum
         </a>
-        <p className="eyebrow">Pilot application</p>
-        <h1>Activate Momentum with an assisted clinic review.</h1>
+        <p className="eyebrow">Solicitud de piloto</p>
+        <h1>Activá Momentum con una revisión asistida.</h1>
         <p>
-          Tell us how your clinic handles WhatsApp and appointments today. We will review fit before
-          production activation.
+          Contanos cómo tu clínica gestiona WhatsApp, agenda y seguimiento hoy. Revisamos encaje,
+          configuración y próximos pasos antes de activar producción.
         </p>
         <div className="lead-proof">
           <span>
-            <MessageCircle aria-hidden="true" /> WhatsApp-native
+            <MessageCircle aria-hidden="true" /> WhatsApp nativo
           </span>
           <span>
-            <CalendarCheck aria-hidden="true" /> Real agenda
+            <CalendarCheck aria-hidden="true" /> Agenda real
           </span>
           <span>
-            <ShieldCheck aria-hidden="true" /> Assisted launch
+            <ShieldCheck aria-hidden="true" /> Activación asistida
           </span>
         </div>
       </section>
 
-      <section className="lead-form-section" aria-label="Clinic lead form">
+      <section className="lead-form-section" aria-label="Formulario de solicitud para clínicas">
         <form className="lead-form" onSubmit={handleSubmit}>
           <div className="form-heading">
             <Sparkles aria-hidden="true" />
             <div>
-              <h2>Clinic details</h2>
-              <p>Qualification fields for a controlled pilot.</p>
+              <h2>Datos de la clínica</h2>
+              <p>Campos mínimos para evaluar un piloto controlado.</p>
             </div>
           </div>
 
           <label>
-            Contact name
+            Nombre y apellido
             <input
               name="contactName"
               required
@@ -91,7 +91,7 @@ export default function LeadPage() {
           </label>
 
           <label>
-            Clinic name
+            Nombre de la clínica
             <input
               name="clinicName"
               required
@@ -101,7 +101,7 @@ export default function LeadPage() {
           </label>
 
           <label>
-            WhatsApp or phone
+            WhatsApp o teléfono
             <input
               name="whatsappOrPhone"
               required
@@ -113,7 +113,7 @@ export default function LeadPage() {
 
           <div className="form-row">
             <label>
-              City
+              Ciudad
               <input
                 name="city"
                 required
@@ -122,7 +122,7 @@ export default function LeadPage() {
               />
             </label>
             <label>
-              Country
+              País
               <input
                 name="country"
                 required
@@ -134,7 +134,7 @@ export default function LeadPage() {
 
           <div className="form-row">
             <label>
-              Professionals
+              Profesionales
               <input
                 name="professionalCount"
                 required
@@ -147,7 +147,7 @@ export default function LeadPage() {
               />
             </label>
             <label>
-              Monthly WhatsApp inquiries
+              Consultas mensuales por WhatsApp
               <select
                 name="monthlyWhatsappInquiries"
                 required
@@ -156,8 +156,8 @@ export default function LeadPage() {
                   setForm({ ...form, monthlyWhatsappInquiries: event.target.value })
                 }
               >
-                <option value="">Select range</option>
-                <option value="under-50">Under 50</option>
+                <option value="">Seleccionar rango</option>
+                <option value="under-50">Menos de 50</option>
                 <option value="50-200">50-200</option>
                 <option value="200-500">200-500</option>
                 <option value="500-plus">500+</option>
@@ -166,7 +166,7 @@ export default function LeadPage() {
           </div>
 
           <label>
-            Current scheduling system
+            Sistema de agenda actual
             <input
               name="currentSchedulingSystem"
               required
@@ -179,7 +179,7 @@ export default function LeadPage() {
           </label>
 
           <label>
-            Main pain
+            Principal dolor operativo
             <select
               name="mainPain"
               required
@@ -206,7 +206,7 @@ export default function LeadPage() {
           ) : null}
 
           <button className="primary-link form-submit" disabled={isSubmitting} type="submit">
-            {isSubmitting ? "Sending..." : "Send application"}
+            {isSubmitting ? "Enviando..." : "Enviar solicitud"}
           </button>
         </form>
       </section>
