@@ -44,14 +44,23 @@ test("document metadata is localized for the public Spanish experience", () => {
   assert.doesNotMatch(layout, /Turn WhatsApp conversations into confirmed appointments/);
 });
 
-test("public CSS includes the redesigned product theater and reduced-motion fallback", () => {
+test("public CSS uses a clean Cluely-style glass palette without the old grid treatment", () => {
   assert.match(css, /\.product-theater/);
   assert.match(css, /\.momentum-os/);
   assert.match(css, /\.command-deck/);
+  assert.match(css, /--page: #eef2f8;/);
+  assert.match(css, /--glass: rgba\(255, 255, 255, 0\.72\);/);
+  assert.match(css, /backdrop-filter: blur\(24px\)/);
+  assert.match(css, /\.lead-intro\s*\{[\s\S]*color: var\(--ink\);/);
   assert.match(css, /@keyframes theaterReveal/);
   assert.match(css, /@keyframes routePulse/);
   assert.match(css, /@keyframes bookingLock/);
   assert.match(css, /@keyframes commandFloat/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
   assert.doesNotMatch(css, /\.mock-phone/);
+  assert.doesNotMatch(css, /#f4efe5|#fffaf0|#ff6f4d|#c7912c/);
+  assert.doesNotMatch(css, /background-size: 88px 88px|background-size: 74px 74px/);
+  assert.doesNotMatch(css, /linear-gradient\(rgba\(22, 18, 13, 0\.055\) 1px/);
+  assert.doesNotMatch(css, /linear-gradient\(rgba\(255, 250, 240, 0\.06\) 1px/);
+  assert.doesNotMatch(css, /var\(--night\) 0 370px|var\(--night\) 0 560px/);
 });
