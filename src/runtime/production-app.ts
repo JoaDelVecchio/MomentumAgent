@@ -49,7 +49,6 @@ export async function createProductionAppRuntime(
   const databaseUrl = readDatabaseUrl(env);
   if (databaseUrl) {
     env.DATABASE_URL = databaseUrl;
-    process.env.DATABASE_URL = databaseUrl;
   }
   const logger = new ConsoleLogger();
 
@@ -82,7 +81,7 @@ export async function createProductionAppRuntime(
   });
   const sharedPrisma =
     calendarProvider === "google" || onboardingRuntimeNeeded
-      ? new PrismaClient()
+      ? createPrismaClient(databaseUrl)
       : undefined;
   let app: FastifyInstance | undefined;
 
@@ -194,6 +193,19 @@ function requirePrisma(prisma: PrismaClient | undefined): PrismaClient {
     throw new Error("Prisma runtime was not initialized");
   }
   return prisma;
+}
+
+function createPrismaClient(databaseUrl: string | undefined): PrismaClient {
+  if (!databaseUrl) {
+    return new PrismaClient();
+  }
+  return new PrismaClient({
+    datasources: {
+      db: {
+        url: databaseUrl
+      }
+    }
+  });
 }
 
 function requireOnboardingPrisma(
