@@ -125,7 +125,7 @@ export class ConversationWorkflow {
     }
 
     if (intent.intent === "question") {
-      const faq = buildFaqResponse(await this.repos.getClinicProfile(input.clinicId), intent);
+      const faq = buildFaqResponse(clinicProfile, intent);
       if (faq) {
         return { kind: "reply", text: faq };
       }
