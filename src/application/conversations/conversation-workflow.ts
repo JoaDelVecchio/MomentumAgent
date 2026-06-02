@@ -3,6 +3,7 @@ import type { AuditLogPort } from "../../ports/audit-log.js";
 import { CalendarInfrastructureError } from "../../ports/calendar.js";
 import type { Conversation, OperationalRepository, PendingBooking } from "../../ports/repositories.js";
 import type { SchedulingService } from "../scheduling/scheduling-service.js";
+import { buildNonTransactionalReply } from "./agent-decisions.js";
 import { buildFaqResponse, hasRequestedFaqTopic, missingConfiguredFaqResponse } from "./faq-response.js";
 import type { ConversationInterpreter, ConversationUnderstanding } from "./interpreter.js";
 import { normalizeText } from "./intent.js";
@@ -46,13 +47,14 @@ export class ConversationWorkflow {
       return { kind: "handoff", text: "Recepcion continua la conversacion por este mismo chat." };
     }
 
+    const clinicProfile = await this.repos.getClinicProfile(input.clinicId);
     const intent = await this.interpreter.interpret({
       clinicId: input.clinicId,
       conversationId: input.conversationId,
       patientId: input.patientId,
       messageText: input.text,
       now: this.now(),
-      clinicProfile: await this.repos.getClinicProfile(input.clinicId),
+      clinicProfile,
       pendingBooking: conversation.pendingBooking
     });
     await this.audit.record({
@@ -70,6 +72,14 @@ export class ConversationWorkflow {
         safetyReason: intent.safetyReason ?? ""
       }
     });
+
+    const nonTransactionalReply = buildNonTransactionalReply({
+      messageText: input.text,
+      clinicProfile
+    });
+    if (nonTransactionalReply) {
+      return nonTransactionalReply;
+    }
 
     if (intent.requiresHuman || intent.intent === "medical_safety" || intent.intent === "handoff") {
       return await this.pauseForHandoff(input);
