@@ -66,8 +66,96 @@ describe("RulesConversationInterpreter", () => {
     );
   });
 
+  it("detects obvious smalltalk and service catalog questions", async () => {
+    const interpreter = new RulesConversationInterpreter();
+
+    await expect(
+      interpreter.interpret({
+        clinicId: "clinic_1",
+        conversationId: "conv_1",
+        patientId: "pat_1",
+        messageText: "como te llamas",
+        now: new Date("2026-06-01T12:00:00.000Z")
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        provider: "rules",
+        intent: "smalltalk",
+        confidence: 0.9
+      })
+    );
+
+    await expect(
+      interpreter.interpret({
+        clinicId: "clinic_1",
+        conversationId: "conv_1",
+        patientId: "pat_1",
+        messageText: "que servicios ofrecen",
+        now: new Date("2026-06-01T12:00:00.000Z")
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        provider: "rules",
+        intent: "services_catalog",
+        confidence: 0.9
+      })
+    );
+  });
+
+  it("prioritizes operational intents over smalltalk and service catalog matches", async () => {
+    const interpreter = new RulesConversationInterpreter();
+
+    await expect(
+      interpreter.interpret({
+        clinicId: "clinic_1",
+        conversationId: "conv_1",
+        patientId: "pat_1",
+        messageText: "quiero hablar con una persona, que servicios ofrecen",
+        now: new Date("2026-06-01T12:00:00.000Z")
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        intent: "handoff",
+        requiresHuman: true
+      })
+    );
+
+    await expect(
+      interpreter.interpret({
+        clinicId: "clinic_1",
+        conversationId: "conv_1",
+        patientId: "pat_1",
+        messageText: "quiero cancelar mi turno y saber que servicios ofrecen",
+        now: new Date("2026-06-01T12:00:00.000Z")
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        intent: "cancel",
+        requiresHuman: false
+      })
+    );
+
+    await expect(
+      interpreter.interpret({
+        clinicId: "clinic_1",
+        conversationId: "conv_1",
+        patientId: "pat_1",
+        messageText: "quiero reservar botox y saber que servicios ofrecen",
+        now: new Date("2026-06-01T12:00:00.000Z")
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        intent: "book",
+        serviceName: "Botox",
+        requiresHuman: false
+      })
+    );
+  });
+
   it.each(
-    conversationEvalCases.filter((testCase) => ["reschedule", "handoff"].includes(testCase.expected.intent ?? ""))
+    conversationEvalCases.filter((testCase) =>
+      ["cancel", "reschedule", "handoff"].includes(testCase.expected.intent ?? "")
+    )
   )("covers deterministic eval: $name", async ({ messageText, expected }) => {
     const result = await new RulesConversationInterpreter().interpret({
       clinicId: "clinic_1",

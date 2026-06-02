@@ -134,10 +134,10 @@ describe("OnboardingTestModeService", () => {
 
     expect(result).toEqual({
       kind: "reply",
-      text: "Ese horario ya no esta disponible. Te busco otro horario si queres."
+      text: "Dry-run: el turno se podria confirmar para 2026-06-01T13:00:00.000Z. No se creo ningun evento real."
     });
     await expect(context.onboarding.getClinicSetup("clinic_setup")).resolves.toEqual(
-      expect.objectContaining({ testConversationPassed: false })
+      expect.objectContaining({ testConversationPassed: true })
     );
     expect(context.operational.listAppointmentsByPatient("test_patient:clinic_setup:dry-run")).toEqual([]);
     await expect(context.calendar.getEvent("evt_1", "cal_perez")).resolves.toBeUndefined();

@@ -14,7 +14,19 @@ export const requestedTopicSchema = z.enum([
 
 export const conversationUnderstandingSchema = z.object({
   provider: z.enum(["rules", "openai", "fallback"]),
-  intent: z.enum(["book", "confirm", "reschedule", "cancel", "question", "handoff", "medical_safety", "unknown"]),
+  intent: z.enum([
+    "book",
+    "confirm",
+    "reschedule",
+    "cancel",
+    "question",
+    "smalltalk",
+    "services_catalog",
+    "slot_refinement",
+    "handoff",
+    "medical_safety",
+    "unknown"
+  ]),
   confidence: z.number().min(0).max(1),
   serviceName: z.string().min(1).nullable().optional(),
   professionalPreference: z.string().min(1).nullable().optional(),

@@ -1,9 +1,9 @@
-import type { Appointment } from "../../domain/types.js";
+import type { Appointment, ClinicProfile } from "../../domain/types.js";
 import type { AuditLogPort } from "../../ports/audit-log.js";
 import { CalendarInfrastructureError } from "../../ports/calendar.js";
 import type { Conversation, OperationalRepository, PendingBooking } from "../../ports/repositories.js";
 import type { SchedulingService } from "../scheduling/scheduling-service.js";
-import { buildNonTransactionalReply } from "./agent-decisions.js";
+import { buildNonTransactionalReply, isPendingSlotRefinementIntent } from "./agent-decisions.js";
 import { buildFaqResponse, hasRequestedFaqTopic, missingConfiguredFaqResponse } from "./faq-response.js";
 import type { ConversationInterpreter, ConversationUnderstanding } from "./interpreter.js";
 import { normalizeText } from "./intent.js";
@@ -25,13 +25,18 @@ export type WorkflowResult =
   | { kind: "reply"; text: string }
   | { kind: "handoff"; text: string };
 
+export type ConversationWorkflowOptions = {
+  bookingMode?: "execute" | "dry-run";
+};
+
 export class ConversationWorkflow {
   constructor(
     private readonly repos: OperationalRepository,
     private readonly scheduling: SchedulingService,
     private readonly audit: AuditLogPort,
     private readonly now: () => Date = () => new Date(),
-    private readonly interpreter: ConversationInterpreter = new RulesConversationInterpreter()
+    private readonly interpreter: ConversationInterpreter = new RulesConversationInterpreter(),
+    private readonly options: ConversationWorkflowOptions = {}
   ) {}
 
   async handleInboundMessage(input: InboundMessage): Promise<WorkflowResult> {
@@ -73,20 +78,20 @@ export class ConversationWorkflow {
       }
     });
 
-    const nonTransactionalReply = buildNonTransactionalReply({
-      messageText: input.text,
-      clinicProfile
-    });
-    if (nonTransactionalReply) {
-      return nonTransactionalReply;
-    }
-
     if (intent.requiresHuman || intent.intent === "medical_safety" || intent.intent === "handoff") {
       return await this.pauseForHandoff(input);
     }
 
     if (hasMedicalSafetyLanguage(input.text)) {
       return await this.pauseForHandoff(input);
+    }
+
+    const nonTransactionalReply = buildNonTransactionalReply({
+      messageText: input.text,
+      clinicProfile
+    });
+    if (nonTransactionalReply) {
+      return nonTransactionalReply;
     }
 
     const pendingBookingFaqResult = await this.tryAnswerPendingBookingQuestion(input, conversation, intent);
@@ -104,6 +109,10 @@ export class ConversationWorkflow {
         kind: "reply",
         text: "No llegue a entenderlo con seguridad. Decime si queres reservar, confirmar, cancelar o cambiar un turno."
       };
+    }
+
+    if (conversation.pendingBooking && isPendingSlotRefinementIntent(intent)) {
+      return await this.handlePendingSlotRefinement(input, conversation, intent, clinicProfile);
     }
 
     if (intent.intent === "book") {
@@ -177,6 +186,70 @@ export class ConversationWorkflow {
     };
     await this.repos.saveConversation(conversation);
     return conversation;
+  }
+
+  private async handlePendingSlotRefinement(
+    input: InboundMessage,
+    conversation: Conversation,
+    intent: ConversationUnderstanding,
+    profile: ClinicProfile | undefined
+  ): Promise<WorkflowResult> {
+    const pending = conversation.pendingBooking;
+    if (!profile || !pending) {
+      return { kind: "reply", text: "Decime que tratamiento queres reservar y te paso horarios disponibles." };
+    }
+
+    const service = profile.services.find((candidate) => candidate.id === pending.serviceId);
+    if (!service) {
+      await this.clearPendingBooking(input.clinicId, input.conversationId);
+      return { kind: "reply", text: "No pude encontrar el tratamiento pendiente. Decime cual queres reservar." };
+    }
+
+    const preferredProfessional = findProfessional(profile, intent.professionalPreference);
+    const searchFrom = startOfDay(this.now());
+    const defaultTo = addDays(searchFrom, 14);
+    const range = resolveSlotSearchRange({
+      defaultFrom: searchFrom,
+      defaultTo,
+      understanding: intent
+    });
+    const slots = filterSlotsByDaypart(
+      await this.scheduling.findSlots({
+        clinicId: input.clinicId,
+        serviceId: service.id,
+        professionalId: preferredProfessional?.id ?? pending.professionalId,
+        from: range.from,
+        to: range.to
+      }),
+      intent,
+      profile.timezone
+    ).filter((slot) => slot.startsAt.getTime() !== pending.startsAt.getTime());
+
+    if (slots.length === 0) {
+      return {
+        kind: "reply",
+        text: `No encontre otro horario disponible para ${service.name} con esa preferencia. Te puedo mantener el horario ofrecido.`
+      };
+    }
+
+    const first = slots[0];
+    const professional = profile.professionals.find((candidate) => candidate.calendarId === first.calendarId);
+    if (!professional) {
+      return { kind: "reply", text: `No pude identificar el profesional disponible para ${service.name}.` };
+    }
+
+    await this.setPendingBooking(input.clinicId, input.conversationId, {
+      ...(pending.appointmentId ? { appointmentId: pending.appointmentId } : {}),
+      serviceId: service.id,
+      professionalId: professional.id,
+      startsAt: first.startsAt,
+      endsAt: first.endsAt
+    });
+
+    return {
+      kind: "reply",
+      text: `Tengo este horario: ${first.startsAt.toISOString()} con disponibilidad para ${service.name}. Si te sirve, lo confirmamos.`
+    };
   }
 
   private async handleBookingIntent(input: InboundMessage, intent: ConversationUnderstanding): Promise<WorkflowResult> {
@@ -260,6 +333,14 @@ export class ConversationWorkflow {
       (await this.missingRequiredPatientFields(input.clinicId, input.patientId)).includes("fullName")
     ) {
       return { kind: "reply", text: "Perfecto. Para confirmar el turno, pasame nombre y apellido." };
+    }
+
+    if (this.options.bookingMode === "dry-run") {
+      await this.clearPendingBooking(input.clinicId, input.conversationId);
+      return {
+        kind: "reply",
+        text: `Dry-run: el turno se podria confirmar para ${pending.startsAt.toISOString()}. No se creo ningun evento real.`
+      };
     }
 
     try {

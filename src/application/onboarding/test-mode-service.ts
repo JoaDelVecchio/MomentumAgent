@@ -63,7 +63,8 @@ export class OnboardingTestModeService {
       scheduling,
       options.audit,
       this.now,
-      options.interpreter ?? new RulesConversationInterpreter()
+      options.interpreter ?? new RulesConversationInterpreter(),
+      { bookingMode: "dry-run" }
     );
   }
 
@@ -109,7 +110,10 @@ export class OnboardingTestModeService {
 }
 
 function isPositiveBookingTestReply(result: WorkflowResult): boolean {
-  return result.kind === "reply" && result.text.includes("Tengo este horario");
+  return (
+    result.kind === "reply" &&
+    (result.text.includes("Tengo este horario") || result.text.includes("Dry-run: el turno se podria confirmar"))
+  );
 }
 
 class DryRunCalendar implements CalendarPort {

@@ -9,6 +9,7 @@ import { interpretIntent, normalizeText } from "./intent.js";
 export class RulesConversationInterpreter implements ConversationInterpreter {
   async interpret(input: ConversationInterpreterInput): Promise<ConversationUnderstanding> {
     const intent = interpretIntent(input.messageText);
+    const normalized = normalizeText(input.messageText);
 
     if (intent.type === "handoff") {
       return {
@@ -22,6 +23,17 @@ export class RulesConversationInterpreter implements ConversationInterpreter {
       };
     }
 
+    if (intent.type === "cancel" || intent.type === "reschedule") {
+      return {
+        provider: "rules",
+        intent: intent.type,
+        confidence: 0.75,
+        requestedTopics: [],
+        requiresHuman: false,
+        reason: `Rule-based ${intent.type} keyword matched.`
+      };
+    }
+
     if (intent.type === "book") {
       return {
         provider: "rules",
@@ -31,6 +43,37 @@ export class RulesConversationInterpreter implements ConversationInterpreter {
         requestedTopics: [],
         requiresHuman: false,
         reason: "Rule-based booking keyword matched."
+      };
+    }
+
+    if (
+      normalized.includes("como te llamas") ||
+      normalized.includes("quien sos") ||
+      normalized.includes("quien eres")
+    ) {
+      return {
+        provider: "rules",
+        intent: "smalltalk",
+        confidence: 0.9,
+        requestedTopics: [],
+        requiresHuman: false,
+        reason: "Rule-based role smalltalk matched."
+      };
+    }
+
+    if (
+      normalized.includes("que servicios ofrecen") ||
+      normalized.includes("servicios ofrecen") ||
+      normalized.includes("que tratamientos tienen") ||
+      normalized.includes("tratamientos ofrecen")
+    ) {
+      return {
+        provider: "rules",
+        intent: "services_catalog",
+        confidence: 0.9,
+        requestedTopics: [],
+        requiresHuman: false,
+        reason: "Rule-based service catalog question matched."
       };
     }
 

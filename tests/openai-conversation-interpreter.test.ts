@@ -30,7 +30,7 @@ describe("OpenAIConversationInterpreter", () => {
       serviceName: "Botox",
       professionalPreference: "Dra. Perez",
       timePreference: "a la tarde",
-      normalizedTimePreference: { daypart: "afternoon" },
+      normalizedTimePreference: { from: null, to: null, daypart: "afternoon" },
       requestedTopics: ["price"],
       patientFullName: null,
       requiresHuman: false,
@@ -61,6 +61,47 @@ describe("OpenAIConversationInterpreter", () => {
       })
     );
     expect(client.lastBody?.tools).toEqual([]);
+    expect(JSON.stringify(client.lastBody)).not.toContain("cal_perez");
+  });
+
+  it("passes pending booking context to OpenAI without calendar identifiers", async () => {
+    const client = new FakeOpenAIClient({
+      intent: "slot_refinement",
+      confidence: 0.91,
+      serviceName: null,
+      professionalPreference: null,
+      timePreference: "a la tarde",
+      normalizedTimePreference: { from: null, to: null, daypart: "afternoon" },
+      requestedTopics: [],
+      patientFullName: null,
+      requiresHuman: false,
+      safetyReason: null,
+      reason: "Patient asks to refine the pending offered slot."
+    });
+
+    const result = await new OpenAIConversationInterpreter({
+      client,
+      model: "gpt-5-mini",
+      timeoutMs: 500
+    }).interpret({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      messageText: "tenes algo a la tarde?",
+      now: new Date("2026-05-29T12:00:00.000Z"),
+      clinicProfile: profile,
+      pendingBooking: {
+        serviceId: "svc_botox",
+        professionalId: "pro_perez",
+        startsAt: new Date("2026-06-01T13:00:00.000Z"),
+        endsAt: new Date("2026-06-01T13:30:00.000Z")
+      }
+    });
+
+    expect(result).toEqual(expect.objectContaining({ intent: "slot_refinement" }));
+    expect(JSON.stringify(client.lastBody)).toContain("svc_botox");
+    expect(JSON.stringify(client.lastBody)).toContain("Botox");
+    expect(JSON.stringify(client.lastBody)).toContain("Dra. Perez");
     expect(JSON.stringify(client.lastBody)).not.toContain("cal_perez");
   });
 
