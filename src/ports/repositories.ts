@@ -10,12 +10,19 @@ export type PendingBooking = {
   endsAt: Date;
 };
 
+export type ConversationMessage = {
+  role: "patient" | "assistant";
+  text: string;
+  at: Date;
+};
+
 export type Conversation = {
   id: Id;
   clinicId: Id;
   patientId: Id;
   botPaused: boolean;
   pendingBooking?: PendingBooking;
+  recentMessages?: ConversationMessage[];
   createdAt: Date;
   updatedAt: Date;
 };

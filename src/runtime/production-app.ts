@@ -23,6 +23,7 @@ import {
 import { readWhatsAppConfig } from "../config/whatsapp.js";
 import { buildDefaultCalendar, type CalendarProvider } from "../dev/seed.js";
 import {
+  buildConversationResponseComposer,
   buildConversationInterpreter,
   buildGoogleCalendarRuntime,
   buildWhatsAppRuntime,
@@ -70,7 +71,9 @@ export async function createProductionAppRuntime(
     adminEnabled: adminConfig.enabled,
     publicWebhookUrl: whatsappConfig.provider === "kapso" ? whatsappConfig.publicWebhookUrl : undefined
   });
-  const conversationInterpreter = buildConversationInterpreter(readAIConfig(env));
+  const aiConfig = readAIConfig(env);
+  const conversationInterpreter = buildConversationInterpreter(aiConfig);
+  const conversationResponseComposer = buildConversationResponseComposer(aiConfig);
   const onboardingRuntimeNeeded = needsOnboardingRuntime({
     adminEnabled: adminConfig.enabled,
     whatsappProvider: whatsappConfig.provider,
@@ -138,6 +141,7 @@ export async function createProductionAppRuntime(
             calendar: googleRuntime?.calendar,
             clinicId: readRuntimeClinicId(env),
             interpreter: conversationInterpreter,
+            responseComposer: conversationResponseComposer,
             clinicActivation
           })
         : undefined;

@@ -3,10 +3,14 @@ import { InMemoryAuditLog } from "../src/adapters/memory/audit-log.js";
 import { FakeCalendar } from "../src/adapters/memory/fake-calendar.js";
 import { InMemoryRepositories } from "../src/adapters/memory/repositories.js";
 import { ConversationWorkflow } from "../src/application/conversations/conversation-workflow.js";
+import type {
+  ConversationResponseComposer,
+  ConversationResponseComposerInput
+} from "../src/application/conversations/response-composer.js";
 import { SchedulingService } from "../src/application/scheduling/scheduling-service.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
 
-function buildContext() {
+function buildContext(options: { responseComposer?: ConversationResponseComposer } = {}) {
   const repos = new InMemoryRepositories();
   const calendar = new FakeCalendar();
   const audit = new InMemoryAuditLog();
@@ -35,7 +39,9 @@ function buildContext() {
 
   const now = () => new Date("2026-05-29T12:00:00.000Z");
   const scheduling = new SchedulingService(repos, calendar, audit, now);
-  const workflow = new ConversationWorkflow(repos, scheduling, audit, now);
+  const workflow = new ConversationWorkflow(repos, scheduling, audit, now, undefined, {
+    responseComposer: options.responseComposer
+  });
 
   return { repos, calendar, audit, workflow };
 }
@@ -59,6 +65,39 @@ describe("ConversationWorkflow", () => {
     expect(result.text).toContain("Tengo este horario");
     expect(result.text).toContain("10:00");
     expect(result.text).not.toContain("DNI");
+  });
+
+  it("can compose a more natural reply and stores the exchange in recent conversation memory", async () => {
+    const responseComposer = new FakeResponseComposer(
+      "Tengo un lugar el lunes 1 de junio a las 10:00 para Botox. Si te sirve, lo dejamos reservado."
+    );
+    const { calendar, repos, workflow } = buildContext({ responseComposer });
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
+    ]);
+
+    const result = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "me quiero hacer botox"
+    });
+
+    const conversation = repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" });
+    expect(result.text).toBe("Tengo un lugar el lunes 1 de junio a las 10:00 para Botox. Si te sirve, lo dejamos reservado.");
+    expect(responseComposer.inputs[0]).toEqual(
+      expect.objectContaining({
+        action: "search_slots",
+        patientMessage: "me quiero hacer botox",
+        draftText: expect.stringContaining("Tengo este horario")
+      })
+    );
+    expect(responseComposer.inputs[0]?.recentMessages).toEqual([]);
+    expect(conversation?.recentMessages).toEqual([
+      expect.objectContaining({ role: "patient", text: "me quiero hacer botox" }),
+      expect.objectContaining({ role: "assistant", text: result.text })
+    ]);
   });
 
   it("asks for required patient data before confirming the offered slot", async () => {
@@ -508,3 +547,14 @@ describe("ConversationWorkflow", () => {
     });
   });
 });
+
+class FakeResponseComposer implements ConversationResponseComposer {
+  inputs: ConversationResponseComposerInput[] = [];
+
+  constructor(private readonly response: string | undefined) {}
+
+  async compose(input: ConversationResponseComposerInput) {
+    this.inputs.push(input);
+    return this.response;
+  }
+}

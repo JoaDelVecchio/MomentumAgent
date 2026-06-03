@@ -46,6 +46,7 @@ type OpenAIConversationInterpreterOptions = {
   client: OpenAIResponsesClient;
   model: string;
   timeoutMs: number;
+  reasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 };
 
 export class OpenAIConversationInterpreter implements ConversationInterpreter {
@@ -59,9 +60,10 @@ export class OpenAIConversationInterpreter implements ConversationInterpreter {
           instructions: buildInstructions(),
           input: JSON.stringify(buildInterpreterPayload(input)),
           tools: [],
-          temperature: 0,
+          reasoning: { effort: this.options.reasoningEffort },
           max_output_tokens: 700,
           text: {
+            verbosity: "low",
             format: zodTextFormat(
               openAIConversationUnderstandingSchema,
               "momentum_conversation_understanding"
@@ -105,6 +107,8 @@ function buildInstructions() {
     "Do not diagnose, recommend treatment for a personal case, or decide medical eligibility.",
     "Classify personal medical advice, pregnancy, adverse symptoms, contraindication questions for the patient's own case, or urgent clinical concerns as medical_safety.",
     "Understand typos, shorthand, Argentine Spanish, and mixed messages. A patient may ask a question and try to book in the same text.",
+    "Use recentMessages and conversationState to resolve references like 'ese', 'el de la tarde', 'me sirve', 'otro horario', or a bare full name.",
+    "Prefer the patient's conversational goal over literal keyword matching. A natural service desire plus availability language is a booking request even without words like 'turno' or 'reservar'.",
     "Set serviceName only to a service present in clinicProfile. Infer it from aliases and natural wording such as 'me quiero hacer botox', 'toxina', or 'info de botox'.",
     "For mixed question plus availability messages such as 'cuanto sale botox y tenes algo a la tarde', use intent book, serviceName Botox, requestedTopics price, and the time preference.",
     "For service questions without a booking request, use intent question and include the matching serviceName plus requestedTopics when possible.",
@@ -131,6 +135,11 @@ function buildInterpreterPayload(input: ConversationInterpreterInput) {
   return {
     messageText: input.messageText,
     now: input.now.toISOString(),
+    recentMessages: input.recentMessages?.map((message) => ({
+      role: message.role,
+      text: message.text,
+      at: message.at.toISOString()
+    })),
     pendingBooking: input.pendingBooking
       ? {
           hasPendingBooking: true,

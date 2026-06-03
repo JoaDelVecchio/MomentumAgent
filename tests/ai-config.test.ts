@@ -10,8 +10,11 @@ describe("readAIConfig", () => {
     expect(readAIConfig({ OPENAI_API_KEY: " sk-test " })).toEqual({
       provider: "openai",
       apiKey: "sk-test",
-      model: "gpt-5-mini",
-      timeoutMs: 1500
+      model: "gpt-5.5",
+      timeoutMs: 1500,
+      reasoningEffort: "medium",
+      interpreterFallback: "clarify",
+      responseComposer: "openai"
     });
   });
 
@@ -27,13 +30,19 @@ describe("readAIConfig", () => {
         AI_INTERPRETER_PROVIDER: " openai ",
         OPENAI_API_KEY: " sk-test ",
         OPENAI_MODEL: " gpt-5-mini ",
-        OPENAI_TIMEOUT_MS: "1200"
+        OPENAI_TIMEOUT_MS: "1200",
+        OPENAI_REASONING_EFFORT: " high ",
+        AI_INTERPRETER_FALLBACK: " rules ",
+        AI_RESPONSE_COMPOSER: " off "
       })
     ).toEqual({
       provider: "openai",
       apiKey: "sk-test",
       model: "gpt-5-mini",
-      timeoutMs: 1200
+      timeoutMs: 1200,
+      reasoningEffort: "high",
+      interpreterFallback: "rules",
+      responseComposer: "off"
     });
   });
 
@@ -78,5 +87,35 @@ describe("readAIConfig", () => {
         })
       ).toThrow("OPENAI_TIMEOUT_MS must be a positive finite integer");
     }
+  });
+
+  it("rejects unsupported OpenAI reasoning effort values", () => {
+    expect(() =>
+      readAIConfig({
+        AI_INTERPRETER_PROVIDER: "openai",
+        OPENAI_API_KEY: "sk-test",
+        OPENAI_REASONING_EFFORT: "extreme"
+      })
+    ).toThrow("Unsupported OPENAI_REASONING_EFFORT: extreme");
+  });
+
+  it("rejects unsupported OpenAI fallback modes", () => {
+    expect(() =>
+      readAIConfig({
+        AI_INTERPRETER_PROVIDER: "openai",
+        OPENAI_API_KEY: "sk-test",
+        AI_INTERPRETER_FALLBACK: "cases"
+      })
+    ).toThrow("Unsupported AI_INTERPRETER_FALLBACK: cases");
+  });
+
+  it("rejects unsupported response composer modes", () => {
+    expect(() =>
+      readAIConfig({
+        AI_INTERPRETER_PROVIDER: "openai",
+        OPENAI_API_KEY: "sk-test",
+        AI_RESPONSE_COMPOSER: "enabled"
+      })
+    ).toThrow("Unsupported AI_RESPONSE_COMPOSER: enabled");
   });
 });

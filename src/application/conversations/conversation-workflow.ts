@@ -1,19 +1,21 @@
 import type { Appointment, ClinicProfile } from "../../domain/types.js";
 import type { AuditLogPort } from "../../ports/audit-log.js";
 import { CalendarInfrastructureError } from "../../ports/calendar.js";
-import type { Conversation, OperationalRepository, PendingBooking } from "../../ports/repositories.js";
+import type { Conversation, ConversationMessage, OperationalRepository, PendingBooking } from "../../ports/repositories.js";
 import type { SchedulingService } from "../scheduling/scheduling-service.js";
-import { decideAgentAction, hasMedicalSafetyLanguage } from "./agent-router.js";
+import { decideAgentAction, hasMedicalSafetyLanguage, type AgentDecision } from "./agent-router.js";
 import { buildConversationState, type ConversationState } from "./agent-state.js";
 import { buildFaqResponse, hasRequestedFaqTopic, missingConfiguredFaqResponse } from "./faq-response.js";
 import type { ConversationInterpreter, ConversationUnderstanding } from "./interpreter.js";
 import { normalizeText } from "./intent.js";
+import type { ConversationResponseComposer } from "./response-composer.js";
 import { formatPatientDateTime } from "./response-formatting.js";
 import { RulesConversationInterpreter } from "./rules-interpreter.js";
 import { findProfessional, findService, formatServiceList } from "./service-matching.js";
 import { filterSlotsByDaypart, resolveSlotSearchRange } from "./time-preferences.js";
 
 const SIDE_EFFECT_CONFIDENCE_THRESHOLD = 0.7;
+const MAX_RECENT_MESSAGES = 12;
 
 type InboundMessage = {
   clinicId: string;
@@ -29,6 +31,7 @@ export type WorkflowResult =
 
 export type ConversationWorkflowOptions = {
   bookingMode?: "execute" | "dry-run";
+  responseComposer?: ConversationResponseComposer;
 };
 
 export class ConversationWorkflow {
@@ -74,7 +77,8 @@ export class ConversationWorkflow {
       now: this.now(),
       clinicProfile,
       pendingBooking: conversation.pendingBooking,
-      conversationState
+      conversationState,
+      recentMessages: conversation.recentMessages ?? []
     });
     await this.audit.record({
       clinicId: input.clinicId,
@@ -112,6 +116,28 @@ export class ConversationWorkflow {
       }
     });
 
+    const result = await this.executeDecision(input, conversation, intent, decision, conversationState, clinicProfile);
+    const finalResult = await this.composeResult({
+      input,
+      result,
+      conversation,
+      intent,
+      decision,
+      conversationState,
+      clinicProfile
+    });
+    await this.rememberExchange(input, finalResult.text);
+    return finalResult;
+  }
+
+  private async executeDecision(
+    input: InboundMessage,
+    conversation: Conversation,
+    intent: ConversationUnderstanding,
+    decision: AgentDecision,
+    conversationState: ConversationState,
+    clinicProfile: ClinicProfile | undefined
+  ): Promise<WorkflowResult> {
     switch (decision.action) {
       case "handoff":
         return await this.pauseForHandoff(input);
@@ -160,6 +186,53 @@ export class ConversationWorkflow {
     }
   }
 
+  private async composeResult(input: {
+    input: InboundMessage;
+    result: WorkflowResult;
+    conversation: Conversation;
+    intent: ConversationUnderstanding;
+    decision: AgentDecision;
+    conversationState: ConversationState;
+    clinicProfile?: ClinicProfile;
+  }): Promise<WorkflowResult> {
+    if (input.result.kind !== "reply" || !this.options.responseComposer) {
+      return input.result;
+    }
+
+    const composedText = await this.options.responseComposer.compose({
+      clinicProfile: input.clinicProfile,
+      conversationState: input.conversationState,
+      understanding: input.intent,
+      action: input.decision.action,
+      patientMessage: input.input.text,
+      recentMessages: input.conversation.recentMessages ?? [],
+      draftText: input.result.text
+    });
+
+    return composedText ? { ...input.result, text: composedText } : input.result;
+  }
+
+  private async rememberExchange(input: InboundMessage, responseText: string) {
+    const conversation = await this.repos.getConversation({
+      clinicId: input.clinicId,
+      conversationId: input.conversationId
+    });
+    if (!conversation) {
+      return;
+    }
+
+    const at = this.now();
+    await this.repos.saveConversation({
+      ...conversation,
+      recentMessages: trimRecentMessages([
+        ...(conversation.recentMessages ?? []),
+        { role: "patient", text: trimConversationText(input.text), at },
+        { role: "assistant", text: trimConversationText(responseText), at }
+      ]),
+      updatedAt: at
+    });
+  }
+
   private async pauseForHandoff(input: InboundMessage): Promise<WorkflowResult> {
     const conversation = await this.repos.getConversation({
       clinicId: input.clinicId,
@@ -192,6 +265,7 @@ export class ConversationWorkflow {
       patientId: input.patientId,
       botPaused: existing?.botPaused ?? false,
       pendingBooking: existing?.pendingBooking,
+      recentMessages: existing?.recentMessages ?? [],
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
     };
@@ -625,6 +699,14 @@ function startOfDay(date: Date) {
 
 function addDays(date: Date, days: number) {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function trimRecentMessages(messages: ConversationMessage[]) {
+  return messages.slice(-MAX_RECENT_MESSAGES);
+}
+
+function trimConversationText(text: string) {
+  return text.replace(/\s+/g, " ").trim().slice(0, 2000);
 }
 
 function buildContextualFallback(state: ConversationState) {

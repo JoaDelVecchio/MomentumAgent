@@ -1,6 +1,7 @@
 import type { Appointment, ClinicProfile, Id, Patient } from "../../domain/types.js";
 import type {
   Conversation,
+  ConversationMessage,
   ConversationByPatientLookup,
   ConversationLookup,
   ListScheduledAppointmentsInput,
@@ -347,6 +348,7 @@ function clonePatient(patient: Patient): Patient {
 function cloneConversation(conversation: Conversation): Conversation {
   const clone: Conversation = {
     ...conversation,
+    recentMessages: (conversation.recentMessages ?? []).map(cloneConversationMessage),
     createdAt: new Date(conversation.createdAt),
     updatedAt: new Date(conversation.updatedAt)
   };
@@ -358,6 +360,14 @@ function cloneConversation(conversation: Conversation): Conversation {
     };
   }
   return clone;
+}
+
+function cloneConversationMessage(message: ConversationMessage): ConversationMessage {
+  return {
+    role: message.role,
+    text: message.text,
+    at: new Date(message.at)
+  };
 }
 
 function cloneAppointment(appointment: Appointment): Appointment {

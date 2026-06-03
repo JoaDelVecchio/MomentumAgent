@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import OpenAI from "openai";
 import { OpenAIConversationInterpreter } from "../adapters/openai/openai-conversation-interpreter.js";
+import { OpenAIConversationResponseComposer } from "../adapters/openai/openai-conversation-response-composer.js";
 import { GoogleCalendarAdapter } from "../adapters/google/google-calendar-adapter.js";
 import { GoogleCalendarApiClient } from "../adapters/google/google-calendar-client.js";
 import { GoogleOAuthService, type GoogleOAuthClient } from "../adapters/google/google-oauth.js";
@@ -14,6 +15,7 @@ import { KapsoWhatsAppProvider } from "../adapters/whatsapp/kapso/kapso-whatsapp
 import { ConversationWorkflow } from "../application/conversations/conversation-workflow.js";
 import { FallbackConversationInterpreter } from "../application/conversations/fallback-interpreter.js";
 import type { ConversationInterpreter } from "../application/conversations/interpreter.js";
+import type { ConversationResponseComposer } from "../application/conversations/response-composer.js";
 import { RulesConversationInterpreter } from "../application/conversations/rules-interpreter.js";
 import { OutboundTemplateService } from "../application/messaging/outbound-template-service.js";
 import { WhatsAppInboundService } from "../application/messaging/whatsapp-inbound-service.js";
@@ -86,6 +88,7 @@ export async function buildWhatsAppRuntime(input: {
   clinicId?: string;
   aiConfig?: AIConfig;
   interpreter?: ConversationInterpreter;
+  responseComposer?: ConversationResponseComposer;
   clinicActivation?: ClinicActivationGuard;
 }) {
   const clinicId = input.clinicId ?? readRuntimeClinicId();
@@ -115,8 +118,12 @@ export async function buildWhatsAppRuntime(input: {
       }
     }
   );
-  const interpreter = input.interpreter ?? buildConversationInterpreter(input.aiConfig ?? readAIConfig());
-  const workflow = new ConversationWorkflow(repos, scheduling, audit, () => new Date(), interpreter);
+  const aiConfig = input.aiConfig ?? (input.interpreter ? undefined : readAIConfig());
+  const interpreter = input.interpreter ?? buildConversationInterpreter(requireAIConfig(aiConfig));
+  const responseComposer = input.responseComposer ?? (aiConfig ? buildConversationResponseComposer(aiConfig) : undefined);
+  const workflow = new ConversationWorkflow(repos, scheduling, audit, () => new Date(), interpreter, {
+    responseComposer
+  });
 
   return {
     outboundAutomation,
@@ -139,14 +146,36 @@ export function buildConversationInterpreter(config: AIConfig): ConversationInte
     return new RulesConversationInterpreter();
   }
 
-  return new FallbackConversationInterpreter(
-    new OpenAIConversationInterpreter({
-      client: new OpenAI({ apiKey: config.apiKey }),
-      model: config.model,
-      timeoutMs: config.timeoutMs
-    }),
-    new RulesConversationInterpreter()
-  );
+  const openAIInterpreter = new OpenAIConversationInterpreter({
+    client: new OpenAI({ apiKey: config.apiKey }),
+    model: config.model,
+    timeoutMs: config.timeoutMs,
+    reasoningEffort: config.reasoningEffort
+  });
+  if (config.interpreterFallback === "rules") {
+    return new FallbackConversationInterpreter(openAIInterpreter, new RulesConversationInterpreter());
+  }
+  return openAIInterpreter;
+}
+
+export function buildConversationResponseComposer(config: AIConfig): ConversationResponseComposer | undefined {
+  if (config.provider !== "openai" || config.responseComposer === "off") {
+    return undefined;
+  }
+
+  return new OpenAIConversationResponseComposer({
+    client: new OpenAI({ apiKey: config.apiKey }),
+    model: config.model,
+    timeoutMs: config.timeoutMs,
+    reasoningEffort: config.reasoningEffort
+  });
+}
+
+function requireAIConfig(config: AIConfig | undefined): AIConfig {
+  if (!config) {
+    throw new Error("AI config is required when no conversation interpreter is injected");
+  }
+  return config;
 }
 
 export function readRuntimeClinicId(env: NodeJS.ProcessEnv = process.env) {

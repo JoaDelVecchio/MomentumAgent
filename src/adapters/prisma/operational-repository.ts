@@ -7,6 +7,7 @@ import type {
   Conversation,
   ConversationByPatientLookup,
   ConversationLookup,
+  ConversationMessage,
   ListScheduledAppointmentsInput,
   OutboundAutomationType,
   OperationalRepository,
@@ -77,6 +78,7 @@ type ConversationRecord = {
   patientId: string;
   botPaused: boolean;
   pendingBookingJson: string | null;
+  recentMessagesJson: string;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -259,6 +261,7 @@ export class PrismaOperationalRepository implements OperationalRepository {
         patientId: conversation.patientId,
         botPaused: conversation.botPaused,
         pendingBookingJson: serializePendingBooking(conversation.pendingBooking),
+        recentMessagesJson: serializeConversationMessages(conversation.recentMessages ?? []),
         createdAt: conversation.createdAt,
         updatedAt: conversation.updatedAt
       },
@@ -267,6 +270,7 @@ export class PrismaOperationalRepository implements OperationalRepository {
         patientId: conversation.patientId,
         botPaused: conversation.botPaused,
         pendingBookingJson: serializePendingBooking(conversation.pendingBooking),
+        recentMessagesJson: serializeConversationMessages(conversation.recentMessages ?? []),
         updatedAt: conversation.updatedAt
       }
     });
@@ -767,6 +771,40 @@ function parsePendingBooking(json: string | null): PendingBooking | undefined {
   };
 }
 
+function serializeConversationMessages(messages: ConversationMessage[]) {
+  return JSON.stringify(
+    messages.map((message) => ({
+      role: message.role,
+      text: message.text,
+      at: message.at.toISOString()
+    }))
+  );
+}
+
+function parseConversationMessages(json: string | null | undefined): ConversationMessage[] {
+  if (!json) return [];
+  const parsed = JSON.parse(json) as unknown;
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  return parsed
+    .filter(
+      (message): message is ConversationMessageJson =>
+        typeof message === "object" &&
+        message !== null &&
+        ((message as ConversationMessageJson).role === "patient" ||
+          (message as ConversationMessageJson).role === "assistant") &&
+        typeof (message as ConversationMessageJson).text === "string" &&
+        typeof (message as ConversationMessageJson).at === "string"
+    )
+    .map((message) => ({
+      role: message.role,
+      text: message.text,
+      at: new Date(message.at)
+    }));
+}
+
 function cloneClinicProfile(profile: ClinicProfile): ClinicProfile {
   return {
     clinicId: profile.clinicId,
@@ -789,6 +827,7 @@ function cloneClinicProfile(profile: ClinicProfile): ClinicProfile {
 function cloneConversation(conversation: Conversation): Conversation {
   const clone: Conversation = {
     ...conversation,
+    recentMessages: (conversation.recentMessages ?? []).map(cloneConversationMessage),
     createdAt: new Date(conversation.createdAt),
     updatedAt: new Date(conversation.updatedAt)
   };
@@ -800,6 +839,14 @@ function cloneConversation(conversation: Conversation): Conversation {
     };
   }
   return clone;
+}
+
+function cloneConversationMessage(message: ConversationMessage): ConversationMessage {
+  return {
+    role: message.role,
+    text: message.text,
+    at: new Date(message.at)
+  };
 }
 
 function toPatient(record: PatientRecord): Patient {
@@ -880,6 +927,7 @@ function toConversation(record: ConversationRecord): Conversation {
     patientId: record.patientId,
     botPaused: record.botPaused,
     pendingBooking: parsePendingBooking(record.pendingBookingJson),
+    recentMessages: parseConversationMessages(record.recentMessagesJson),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
   });
@@ -1040,4 +1088,8 @@ async function withKeyedLock<T>(
 type PendingBookingJson = Omit<PendingBooking, "startsAt" | "endsAt"> & {
   startsAt: string;
   endsAt: string;
+};
+
+type ConversationMessageJson = Omit<ConversationMessage, "at"> & {
+  at: string;
 };

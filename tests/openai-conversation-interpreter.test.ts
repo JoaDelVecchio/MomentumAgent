@@ -41,14 +41,19 @@ describe("OpenAIConversationInterpreter", () => {
     const result = await new OpenAIConversationInterpreter({
       client,
       model: "gpt-5-mini",
-      timeoutMs: 500
+      timeoutMs: 500,
+      reasoningEffort: "medium"
     }).interpret({
       clinicId: "clinic_1",
       conversationId: "conv_1",
       patientId: "pat_1",
       messageText: "Cuanto sale botox y tenes a la tarde?",
       now: new Date("2026-05-29T12:00:00.000Z"),
-      clinicProfile: profile
+      clinicProfile: profile,
+      recentMessages: [
+        { role: "patient", text: "hola", at: new Date("2026-05-29T11:58:00.000Z") },
+        { role: "assistant", text: "Hola, te ayudo con turnos.", at: new Date("2026-05-29T11:58:01.000Z") }
+      ]
     });
 
     expect(result).toEqual(
@@ -63,6 +68,8 @@ describe("OpenAIConversationInterpreter", () => {
     expect(client.lastBody?.tools).toEqual([]);
     expect(client.lastBody?.instructions).toContain("mixed question plus availability");
     expect(client.lastBody?.instructions).toContain("me quiero hacer botox");
+    expect(client.lastBody?.reasoning).toEqual({ effort: "medium" });
+    expect(JSON.parse(client.lastBody?.input ?? "{}").recentMessages).toHaveLength(2);
     expect(JSON.stringify(client.lastBody)).not.toContain("cal_perez");
   });
 
@@ -84,7 +91,8 @@ describe("OpenAIConversationInterpreter", () => {
     const result = await new OpenAIConversationInterpreter({
       client,
       model: "gpt-5-mini",
-      timeoutMs: 500
+      timeoutMs: 500,
+      reasoningEffort: "medium"
     }).interpret({
       clinicId: "clinic_1",
       conversationId: "conv_1",
@@ -134,7 +142,8 @@ describe("OpenAIConversationInterpreter", () => {
     const result = await new OpenAIConversationInterpreter({
       client,
       model: "gpt-5-mini",
-      timeoutMs: 500
+      timeoutMs: 500,
+      reasoningEffort: "medium"
     }).interpret({
       clinicId: "clinic_1",
       conversationId: "conv_1",
@@ -159,7 +168,8 @@ describe("OpenAIConversationInterpreter", () => {
     const result = await new OpenAIConversationInterpreter({
       client,
       model: "gpt-5-mini",
-      timeoutMs: 500
+      timeoutMs: 500,
+      reasoningEffort: "medium"
     }).interpret({
       clinicId: "clinic_1",
       conversationId: "conv_1",
