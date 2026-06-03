@@ -13,7 +13,7 @@ describe("readAIConfig", () => {
       model: "gpt-5.5",
       timeoutMs: 1500,
       reasoningEffort: "medium",
-      interpreterFallback: "clarify",
+      interpreterFallback: "rules",
       responseComposer: "openai"
     });
   });

@@ -5,6 +5,8 @@ import type {
   ConversationInterpreterInput,
   ConversationUnderstanding
 } from "../src/application/conversations/interpreter.js";
+import { RulesConversationInterpreter } from "../src/application/conversations/rules-interpreter.js";
+import { parseClinicProfile } from "../src/domain/clinic-profile.js";
 
 const input: ConversationInterpreterInput = {
   clinicId: "clinic_1",
@@ -13,6 +15,26 @@ const input: ConversationInterpreterInput = {
   messageText: "Quiero reservar botox",
   now: new Date("2026-06-01T12:00:00.000Z")
 };
+
+const clinicProfile = parseClinicProfile({
+  clinicId: "clinic_1",
+  name: "Clinica Demo",
+  timezone: "America/Argentina/Buenos_Aires",
+  services: [
+    {
+      id: "svc_botox",
+      name: "Botox",
+      durationMinutes: 30,
+      priceText: "Desde $120.000",
+      preparation: "Evitar alcohol 24 horas antes.",
+      restrictions: [],
+      professionalIds: ["pro_perez"]
+    }
+  ],
+  professionals: [{ id: "pro_perez", name: "Dra. Perez", calendarId: "cal_perez" }],
+  appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 0, bufferMinutes: 0 },
+  requiredPatientFields: ["fullName"]
+});
 
 describe("FallbackConversationInterpreter", () => {
   it("returns the primary interpretation when it is usable", async () => {
@@ -63,6 +85,7 @@ describe("FallbackConversationInterpreter", () => {
     ).interpret(input);
 
     expect(result).toEqual(expect.objectContaining({ provider: "rules", intent: "book", serviceName: "Botox" }));
+    expect(result.reason).toContain("Primary provider fallback: OpenAI failed.");
     expect(fallback.calls).toBe(1);
   });
 
@@ -79,7 +102,37 @@ describe("FallbackConversationInterpreter", () => {
     const result = await new FallbackConversationInterpreter(new ThrowingInterpreter(), fallback).interpret(input);
 
     expect(result).toEqual(expect.objectContaining({ provider: "rules", intent: "question" }));
+    expect(result.reason).toContain("Primary provider fallback: primary failed");
     expect(fallback.calls).toBe(1);
+  });
+
+  it("recovers booking intent for typo-heavy availability messages when OpenAI fails", async () => {
+    const result = await new FallbackConversationInterpreter(
+      new FixedInterpreter({
+        provider: "fallback",
+        intent: "unknown",
+        confidence: 0,
+        requestedTopics: [],
+        requiresHuman: false,
+        reason: "OpenAI timed out."
+      }),
+      new RulesConversationInterpreter()
+    ).interpret({
+      ...input,
+      clinicProfile,
+      messageText: "botox para maniana?"
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: "rules",
+        intent: "book",
+        serviceName: "Botox"
+      })
+    );
+    expect(result.normalizedTimePreference?.from).toEqual(new Date("2026-06-02T00:00:00.000Z"));
+    expect(result.normalizedTimePreference?.to).toEqual(new Date("2026-06-03T00:00:00.000Z"));
+    expect(result.reason).toContain("Primary provider fallback: OpenAI timed out.");
   });
 });
 

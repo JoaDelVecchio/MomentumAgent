@@ -11,7 +11,7 @@ This mirrors the common architecture used by strong production assistants:
 - The model returns structured understanding instead of directly mutating state.
 - Deterministic workflow code executes side effects and validates confidence, safety, and state.
 - A second AI pass may rewrite the safe draft reply, but it cannot change facts or invent availability.
-- Rules are kept as an explicit fallback mode only, not the default when OpenAI is configured.
+- Rules are kept as an operational safety net when OpenAI is configured, not as the primary language layer.
 
 ## Why not full free-form actions
 
@@ -23,13 +23,13 @@ For this clinic assistant, "full IA" should not mean the model can create appoin
 - `ConversationWorkflow` passes recent conversation memory to the interpreter.
 - `ConversationWorkflow` persists the last conversation turns in `Conversation.recentMessagesJson`.
 - `OpenAIConversationResponseComposer` rewrites safe draft replies in Argentine Spanish.
-- `AI_INTERPRETER_FALLBACK=rules` is now opt-in. Default OpenAI failure behavior is clarification/contextual fallback, not keyword rules.
+- `AI_INTERPRETER_FALLBACK=rules` is the default. If OpenAI times out, returns invalid structured output, or is unavailable, booking/cancel/reschedule intent falls back to deterministic rules instead of a generic clarification.
 
 ## Runtime knobs
 
 - `OPENAI_MODEL`: defaults to `gpt-5.5`.
 - `OPENAI_REASONING_EFFORT`: `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`; defaults to `medium`.
-- `AI_INTERPRETER_FALLBACK`: `clarify` or `rules`; defaults to `clarify`.
+- `AI_INTERPRETER_FALLBACK`: `rules` or `clarify`; defaults to `rules`.
 - `AI_RESPONSE_COMPOSER`: `openai` or `off`; defaults to `openai`.
 
 ## Sources reviewed

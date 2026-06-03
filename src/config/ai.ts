@@ -37,7 +37,7 @@ export function readAIConfig(env: NodeJS.ProcessEnv = process.env): AIConfig {
     throw new Error("OPENAI_TIMEOUT_MS must be a positive finite integer");
   }
   const reasoningEffort = parseReasoningEffort(optionalEnv(env.OPENAI_REASONING_EFFORT) ?? "medium");
-  const interpreterFallback = parseInterpreterFallback(optionalEnv(env.AI_INTERPRETER_FALLBACK) ?? "clarify");
+  const interpreterFallback = parseInterpreterFallback(optionalEnv(env.AI_INTERPRETER_FALLBACK) ?? "rules");
   const responseComposer = parseResponseComposer(optionalEnv(env.AI_RESPONSE_COMPOSER) ?? "openai");
 
   return {

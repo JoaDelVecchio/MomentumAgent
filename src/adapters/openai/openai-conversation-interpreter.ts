@@ -77,8 +77,8 @@ export class OpenAIConversationInterpreter implements ConversationInterpreter {
         provider: "openai",
         ...normalizeOpenAIOutput(response.output_parsed ?? {})
       });
-    } catch {
-      return fallbackUnderstanding();
+    } catch (error) {
+      return fallbackUnderstanding(error);
     }
   }
 }
@@ -173,13 +173,20 @@ function buildInterpreterPayload(input: ConversationInterpreterInput) {
   };
 }
 
-function fallbackUnderstanding(): ConversationUnderstanding {
+function fallbackUnderstanding(error?: unknown): ConversationUnderstanding {
   return {
     provider: "fallback",
     intent: "unknown",
     confidence: 0,
     requestedTopics: [],
     requiresHuman: false,
-    reason: "OpenAI interpreter failed or returned invalid structured output."
+    reason: error
+      ? `OpenAI interpreter failed or returned invalid structured output: ${errorMessage(error)}`
+      : "OpenAI interpreter failed or returned invalid structured output."
   };
+}
+
+function errorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/\s+/g, " ").slice(0, 500);
 }

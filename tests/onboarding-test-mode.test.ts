@@ -9,6 +9,12 @@ import type {
   ConversationInterpreterInput,
   ConversationUnderstanding
 } from "../src/application/conversations/interpreter.js";
+import { FallbackConversationInterpreter } from "../src/application/conversations/fallback-interpreter.js";
+import type {
+  ConversationResponseComposer,
+  ConversationResponseComposerInput
+} from "../src/application/conversations/response-composer.js";
+import { RulesConversationInterpreter } from "../src/application/conversations/rules-interpreter.js";
 import { OnboardingService } from "../src/application/onboarding/onboarding-service.js";
 import { OnboardingTestModeService } from "../src/application/onboarding/test-mode-service.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
@@ -175,6 +181,64 @@ describe("OnboardingTestModeService", () => {
       text: "Te ayudo con informacion y turnos. Decime que tratamiento te interesa o si queres reservar, cancelar o cambiar un turno."
     });
   });
+
+  it("keeps booking usable in test mode when the primary AI interpreter falls back", async () => {
+    const context = await buildContext({
+      interpreter: new FallbackConversationInterpreter(
+        new FixedInterpreter({
+          provider: "fallback",
+          intent: "unknown",
+          confidence: 0,
+          requestedTopics: [],
+          requiresHuman: false,
+          reason: "OpenAI timed out."
+        }),
+        new RulesConversationInterpreter()
+      )
+    });
+    context.calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-02T13:00:00.000Z"), endsAt: new Date("2026-06-02T13:30:00.000Z") }
+    ]);
+
+    const result = await context.testModeService.runMessage({
+      clinicId: "clinic_setup",
+      conversationId: "test:clinic_setup:fallback-booking",
+      patientId: "test_patient:clinic_setup:fallback-booking",
+      whatsappNumber: "+5490001111112",
+      text: "botox para maniana?"
+    });
+
+    expect(result.kind).toBe("reply");
+    expect(result.text).toContain("Tengo este horario");
+    expect(result.text).toContain("Botox");
+  });
+
+  it("uses an injected response composer in test mode", async () => {
+    const responseComposer = new FixedResponseComposer("Si, tengo un horario disponible para Botox. Si te sirve, lo avanzamos.");
+    const context = await buildContext({ responseComposer });
+    context.calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
+    ]);
+
+    const result = await context.testModeService.runMessage({
+      clinicId: "clinic_setup",
+      conversationId: "test:clinic_setup:composer",
+      patientId: "test_patient:clinic_setup:composer",
+      whatsappNumber: "+5490001111113",
+      text: "Quiero reservar botox"
+    });
+
+    expect(result).toEqual({
+      kind: "reply",
+      text: "Si, tengo un horario disponible para Botox. Si te sirve, lo avanzamos."
+    });
+    expect(responseComposer.inputs[0]).toEqual(
+      expect.objectContaining({
+        action: "search_slots",
+        patientMessage: "Quiero reservar botox"
+      })
+    );
+  });
 });
 
 describe("onboarding test mode route", () => {
@@ -323,7 +387,9 @@ describe("onboarding test mode route", () => {
   });
 });
 
-async function buildContext(options: { interpreter?: ConversationInterpreter } = {}) {
+async function buildContext(
+  options: { interpreter?: ConversationInterpreter; responseComposer?: ConversationResponseComposer } = {}
+) {
   const onboarding = new InMemoryOnboardingRepository();
   const operational = new InMemoryRepositories();
   const audit = new InMemoryAuditLog();
@@ -336,7 +402,8 @@ async function buildContext(options: { interpreter?: ConversationInterpreter } =
     audit,
     calendar,
     now,
-    interpreter: options.interpreter
+    interpreter: options.interpreter,
+    responseComposer: options.responseComposer
   });
 
   await onboardingService.createManualClinic({
@@ -388,5 +455,16 @@ class FixedInterpreter implements ConversationInterpreter {
   async interpret(input: ConversationInterpreterInput): Promise<ConversationUnderstanding> {
     this.inputs.push(input);
     return this.understanding;
+  }
+}
+
+class FixedResponseComposer implements ConversationResponseComposer {
+  readonly inputs: ConversationResponseComposerInput[] = [];
+
+  constructor(private readonly text: string | undefined) {}
+
+  async compose(input: ConversationResponseComposerInput): Promise<string | undefined> {
+    this.inputs.push(input);
+    return this.text;
   }
 }

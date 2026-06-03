@@ -119,7 +119,8 @@ export async function createProductionAppRuntime(
             operational: new PrismaOperationalRepository(requirePrisma(sharedPrisma)),
             audit: new PrismaAuditLog(requirePrisma(sharedPrisma)),
             calendar: googleRuntime?.calendar ?? buildDefaultCalendar(calendarProvider),
-            interpreter: conversationInterpreter
+            interpreter: conversationInterpreter,
+            responseComposer: conversationResponseComposer
           })
         : undefined;
     const conversationControl =

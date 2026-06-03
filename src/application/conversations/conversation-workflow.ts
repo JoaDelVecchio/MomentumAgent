@@ -92,7 +92,8 @@ export class ConversationWorkflow {
         serviceName: intent.serviceName ?? "",
         requestedTopics: intent.requestedTopics.join(","),
         requiresHuman: String(intent.requiresHuman),
-        safetyReason: intent.safetyReason ?? ""
+        safetyReason: intent.safetyReason ?? "",
+        reason: intent.reason
       }
     });
 
