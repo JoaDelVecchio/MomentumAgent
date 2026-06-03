@@ -8,6 +8,7 @@ import { buildConversationState, type ConversationState } from "./agent-state.js
 import { buildFaqResponse, hasRequestedFaqTopic, missingConfiguredFaqResponse } from "./faq-response.js";
 import type { ConversationInterpreter, ConversationUnderstanding } from "./interpreter.js";
 import { normalizeText } from "./intent.js";
+import { formatPatientDateTime } from "./response-formatting.js";
 import { RulesConversationInterpreter } from "./rules-interpreter.js";
 import { findProfessional, findService, formatServiceList } from "./service-matching.js";
 import { filterSlotsByDaypart, resolveSlotSearchRange } from "./time-preferences.js";
@@ -258,7 +259,7 @@ export class ConversationWorkflow {
 
     return {
       kind: "reply",
-      text: `Tengo este horario: ${first.startsAt.toISOString()} con disponibilidad para ${service.name}. Si te sirve, lo confirmamos.`
+      text: `Tengo este horario: ${this.formatDateForPatient(first.startsAt, profile)} para ${service.name}. Si te sirve, lo confirmamos.`
     };
   }
 
@@ -328,7 +329,7 @@ export class ConversationWorkflow {
     const faqPrefix = buildBookingFaqPrefix(profile, intent);
     return {
       kind: "reply",
-      text: `${faqPrefix}Tengo este horario: ${first.startsAt.toISOString()} con disponibilidad para ${service.name}. Si te sirve, lo confirmamos.`
+      text: `${faqPrefix}Tengo este horario: ${this.formatDateForPatient(first.startsAt, profile)} para ${service.name}. Si te sirve, lo confirmamos.`
     };
   }
 
@@ -349,7 +350,7 @@ export class ConversationWorkflow {
       await this.clearPendingBooking(input.clinicId, input.conversationId);
       return {
         kind: "reply",
-        text: `Dry-run: el turno se podria confirmar para ${pending.startsAt.toISOString()}. No se creo ningun evento real.`
+        text: `Dry-run: el turno se podria confirmar para ${await this.formatDateForClinic(input.clinicId, pending.startsAt)}. No se creo ningun evento real.`
       };
     }
 
@@ -374,8 +375,8 @@ export class ConversationWorkflow {
       return {
         kind: "reply",
         text: pending.appointmentId
-          ? `Turno reprogramado para ${appointment.startsAt.toISOString()}. Te vamos a enviar el recordatorio antes del turno.`
-          : `Turno confirmado para ${appointment.startsAt.toISOString()}. Te vamos a enviar el recordatorio antes del turno.`
+          ? `Turno reprogramado para ${await this.formatDateForClinic(input.clinicId, appointment.startsAt)}. Te vamos a enviar el recordatorio antes del turno.`
+          : `Turno confirmado para ${await this.formatDateForClinic(input.clinicId, appointment.startsAt)}. Te vamos a enviar el recordatorio antes del turno.`
       };
     } catch (error) {
       if (error instanceof CalendarInfrastructureError) {
@@ -480,7 +481,7 @@ export class ConversationWorkflow {
         conversationId: input.conversationId
       });
 
-      return { kind: "reply", text: `Turno cancelado: ${cancelled.startsAt.toISOString()}.` };
+      return { kind: "reply", text: `Turno cancelado: ${await this.formatDateForClinic(input.clinicId, cancelled.startsAt)}.` };
     } catch (error) {
       if (error instanceof CalendarInfrastructureError) {
         throw error;
@@ -527,7 +528,7 @@ export class ConversationWorkflow {
 
     return {
       kind: "reply",
-      text: `Tengo este nuevo horario: ${nextSlot.startsAt.toISOString()}. Si te sirve, lo confirmamos.`
+      text: `Tengo este nuevo horario: ${this.formatDateForPatient(nextSlot.startsAt, profile)}. Si te sirve, lo confirmamos.`
     };
   }
 
@@ -536,6 +537,15 @@ export class ConversationWorkflow {
       (appointment) => appointment.clinicId === input.clinicId && appointment.status === "scheduled"
     );
     return scheduled.length === 1 ? scheduled[0] : undefined;
+  }
+
+  private formatDateForPatient(date: Date, profile: ClinicProfile | undefined) {
+    return formatPatientDateTime(date, profile?.timezone);
+  }
+
+  private async formatDateForClinic(clinicId: string, date: Date) {
+    const profile = await this.repos.getClinicProfile(clinicId);
+    return this.formatDateForPatient(date, profile);
   }
 }
 

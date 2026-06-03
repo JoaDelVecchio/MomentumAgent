@@ -531,10 +531,9 @@ describe("ConversationWorkflow with AI understanding", () => {
       text: "Mi nombre es Ana Gomez"
     });
 
-    expect(result).toEqual({
-      kind: "reply",
-      text: "Turno confirmado para 2026-06-01T13:00:00.000Z. Te vamos a enviar el recordatorio antes del turno."
-    });
+    expect(result.kind).toBe("reply");
+    expect(result.text).toContain("Turno confirmado");
+    expect(result.text).toContain("10:00");
     expect(repos.getPatient("pat_1")?.fullName).toBe("Ana Gomez");
     expect(repos.listAppointmentsByPatient("pat_1")).toEqual([
       expect.objectContaining({
@@ -766,7 +765,8 @@ describe("ConversationWorkflow with AI understanding", () => {
 
     expect(result.kind).toBe("reply");
     expect(result.text).toContain("Botox: precio Desde $120.000.");
-    expect(result.text).toContain("Tengo este horario: 2026-06-01T13:00:00.000Z");
+    expect(result.text).toContain("Tengo este horario");
+    expect(result.text).toContain("10:00");
   });
 
   it("filters offered booking slots by AI professional preference", async () => {
@@ -819,8 +819,8 @@ describe("ConversationWorkflow with AI understanding", () => {
     });
 
     expect(result.kind).toBe("reply");
-    expect(result.text).toContain("2026-06-01T15:00:00.000Z");
-    expect(result.text).not.toContain("2026-06-01T13:00:00.000Z");
+    expect(result.text).toContain("12:00");
+    expect(result.text).not.toContain("10:00");
   });
 
   it("filters offered booking slots by normalized afternoon preference", async () => {
@@ -848,6 +848,6 @@ describe("ConversationWorkflow with AI understanding", () => {
     });
 
     expect(result.kind).toBe("reply");
-    expect(result.text).toContain("2026-06-01T15:00:00.000Z");
+    expect(result.text).toContain("12:00");
   });
 });

@@ -26,6 +26,14 @@ export function buildFaqResponse(
     return undefined;
   }
 
+  if (understanding.requestedTopics.length === 0) {
+    const parts = buildServiceFactParts(service, ["price", "duration", "preparation", "restrictions"]);
+    if (parts.length === 0) {
+      return undefined;
+    }
+    return `${service.name}: ${parts.join(" ")} Si queres, tambien puedo buscarte un turno.`;
+  }
+
   if (!hasAllRequestedServiceFacts(service, understanding.requestedTopics)) {
     return undefined;
   }

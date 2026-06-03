@@ -63,7 +63,7 @@ export const momentumAgentTranscriptCases: MomentumAgentTranscriptCase[] = [
         text: "Hola, quiero reservar botox",
         understanding: { intent: "book", serviceName: "Botox" },
         expectedAction: "search_slots",
-        expectedReplyIncludes: ["Tengo este horario", "2026-06-03T16:00:00.000Z", "Botox"],
+        expectedReplyIncludes: ["Tengo este horario", "13:00", "Botox"],
         expectedPendingStartsAt: "2026-06-03T16:00:00.000Z",
         expectedAppointmentCount: 0
       },
@@ -87,7 +87,7 @@ export const momentumAgentTranscriptCases: MomentumAgentTranscriptCase[] = [
         text: "Ana Gomez",
         understanding: { intent: "unknown", patientFullName: "Ana Gomez" },
         expectedAction: "complete_pending_patient_data",
-        expectedReplyIncludes: ["Turno confirmado", "2026-06-03T16:00:00.000Z"],
+        expectedReplyIncludes: ["Turno confirmado", "13:00"],
         expectedPendingCleared: true,
         expectedAppointmentCount: 1,
         expectedAppointmentStartsAt: "2026-06-03T16:00:00.000Z",
@@ -132,7 +132,7 @@ export const momentumAgentTranscriptCases: MomentumAgentTranscriptCase[] = [
         text: "quiero cambiar mi turno",
         understanding: { intent: "reschedule" },
         expectedAction: "reschedule_appointment",
-        expectedReplyIncludes: ["Tengo este nuevo horario", "2026-06-03T15:00:00.000Z"],
+        expectedReplyIncludes: ["Tengo este nuevo horario", "12:00"],
         expectedPendingStartsAt: "2026-06-03T15:00:00.000Z",
         expectedAppointmentStartsAt: "2026-06-03T10:00:00.000Z"
       },
@@ -148,7 +148,7 @@ export const momentumAgentTranscriptCases: MomentumAgentTranscriptCase[] = [
           }
         },
         expectedAction: "refine_pending_slot",
-        expectedReplyIncludes: ["2026-06-04T15:00:00.000Z"],
+        expectedReplyIncludes: ["12:00"],
         expectedPendingStartsAt: "2026-06-04T15:00:00.000Z",
         expectedAppointmentStartsAt: "2026-06-03T10:00:00.000Z"
       },
@@ -156,7 +156,7 @@ export const momentumAgentTranscriptCases: MomentumAgentTranscriptCase[] = [
         text: "si",
         understanding: { intent: "confirm" },
         expectedAction: "confirm_pending_booking",
-        expectedReplyIncludes: ["Turno reprogramado", "2026-06-04T15:00:00.000Z"],
+        expectedReplyIncludes: ["Turno reprogramado", "12:00"],
         expectedPendingCleared: true,
         expectedAppointmentCount: 1,
         expectedAppointmentStartsAt: "2026-06-04T15:00:00.000Z"

@@ -61,6 +61,8 @@ describe("OpenAIConversationInterpreter", () => {
       })
     );
     expect(client.lastBody?.tools).toEqual([]);
+    expect(client.lastBody?.instructions).toContain("mixed question plus availability");
+    expect(client.lastBody?.instructions).toContain("me quiero hacer botox");
     expect(JSON.stringify(client.lastBody)).not.toContain("cal_perez");
   });
 

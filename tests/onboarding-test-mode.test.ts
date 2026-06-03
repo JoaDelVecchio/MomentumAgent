@@ -132,10 +132,10 @@ describe("OnboardingTestModeService", () => {
     });
     const result = await context.testModeService.runMessage({ ...input, text: "Ana Gomez" });
 
-    expect(result).toEqual({
-      kind: "reply",
-      text: "Dry-run: el turno se podria confirmar para 2026-06-01T13:00:00.000Z. No se creo ningun evento real."
-    });
+    expect(result.kind).toBe("reply");
+    expect(result.text).toContain("Dry-run: el turno se podria confirmar");
+    expect(result.text).toContain("10:00");
+    expect(result.text).toContain("No se creo ningun evento real.");
     await expect(context.onboarding.getClinicSetup("clinic_setup")).resolves.toEqual(
       expect.objectContaining({ testConversationPassed: true })
     );

@@ -173,7 +173,7 @@ describe("Momentum Conversational Agent Phase 1", () => {
       text: "Hola, quiero reservar botox."
     });
     expect(offer.kind).toBe("reply");
-    expect(offer.text).toContain("2026-06-03T16:00:00.000Z");
+    expect(offer.text).toContain("13:00");
 
     const smalltalk = await workflow.handleInboundMessage({
       clinicId: "clinic_1",
@@ -195,7 +195,7 @@ describe("Momentum Conversational Agent Phase 1", () => {
       text: "que turnos tene sel 7 de junio"
     });
     expect(dateFollowUp.kind).toBe("reply");
-    expect(dateFollowUp.text).toContain("2026-06-07T14:00:00.000Z");
+    expect(dateFollowUp.text).toContain("11:00");
     expect(dateFollowUp.text).not.toContain("No encontre ese tratamiento");
     expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_real" })?.pendingBooking).toEqual(
       expect.objectContaining({
@@ -285,7 +285,7 @@ describe("Momentum Conversational Agent Phase 1", () => {
     });
 
     expect(result.kind).toBe("reply");
-    expect(result.text).toContain("2026-06-02T15:00:00.000Z");
+    expect(result.text).toContain("12:00");
     expect(result.text).not.toContain("Decime que tratamiento");
     expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual(
       expect.objectContaining({
@@ -334,7 +334,7 @@ describe("Momentum Conversational Agent Phase 1", () => {
     });
 
     expect(result.kind).toBe("reply");
-    expect(result.text).toContain("2026-06-02T15:00:00.000Z");
+    expect(result.text).toContain("12:00");
     expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual(
       expect.objectContaining({
         appointmentId: "apt_1",

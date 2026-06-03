@@ -149,6 +149,54 @@ describe("RulesConversationInterpreter", () => {
     );
   });
 
+  it("keeps configured service context for natural FAQ questions", async () => {
+    const result = await new RulesConversationInterpreter().interpret({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      messageText: "Cuanto sale botox?",
+      now: new Date("2026-06-03T12:00:00.000Z"),
+      clinicProfile: profile
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: "rules",
+        intent: "question",
+        confidence: 0.75,
+        serviceName: "Botox",
+        requestedTopics: ["price"],
+        requiresHuman: false
+      })
+    );
+  });
+
+  it("treats natural service and availability phrasing as booking intent", async () => {
+    const result = await new RulesConversationInterpreter().interpret({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      messageText: "Hola, me quiero hacer botox manana a la tarde",
+      now: new Date("2026-06-03T12:00:00.000Z"),
+      clinicProfile: profile
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: "rules",
+        intent: "book",
+        serviceName: "Botox",
+        timePreference: "Hola, me quiero hacer botox manana a la tarde",
+        normalizedTimePreference: expect.objectContaining({
+          from: new Date("2026-06-04T00:00:00.000Z"),
+          to: new Date("2026-06-05T00:00:00.000Z"),
+          daypart: "afternoon"
+        }),
+        requiresHuman: false
+      })
+    );
+  });
+
   it("prioritizes operational intents over smalltalk and service catalog matches", async () => {
     const interpreter = new RulesConversationInterpreter();
 

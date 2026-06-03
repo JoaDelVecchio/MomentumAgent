@@ -18,6 +18,22 @@ export function findService(profile: ClinicProfile, serviceName: string | null |
   });
 }
 
+export function findMentionedService(profile: ClinicProfile, text: string): Service | undefined {
+  const normalizedText = normalizeText(text);
+  if (!normalizedText) {
+    return undefined;
+  }
+
+  const matches = profile.services.filter((service) => {
+    const normalizedCandidate = normalizeText(service.name);
+    return (
+      normalizedCandidate.length >= 3 &&
+      (normalizedText.includes(normalizedCandidate) || matchesKnownAlias(normalizedCandidate, normalizedText))
+    );
+  });
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 export function findProfessional(
   profile: ClinicProfile,
   professionalPreference: string | null | undefined

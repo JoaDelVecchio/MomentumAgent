@@ -5,7 +5,7 @@ export type AIConfig =
   | { provider: "openai"; apiKey: string; model: string; timeoutMs: number };
 
 export function readAIConfig(env: NodeJS.ProcessEnv = process.env): AIConfig {
-  const provider = optionalEnv(env.AI_INTERPRETER_PROVIDER) ?? "rules";
+  const provider = optionalEnv(env.AI_INTERPRETER_PROVIDER) ?? inferDefaultProvider(env);
   if (provider === "rules") {
     return { provider: "rules" };
   }
@@ -31,6 +31,10 @@ export function readAIConfig(env: NodeJS.ProcessEnv = process.env): AIConfig {
     model: model ?? "gpt-5-mini",
     timeoutMs
   };
+}
+
+function inferDefaultProvider(env: NodeJS.ProcessEnv) {
+  return optionalEnv(env.OPENAI_API_KEY) ? "openai" : "rules";
 }
 
 function isBlankPlaceholder(value: string) {

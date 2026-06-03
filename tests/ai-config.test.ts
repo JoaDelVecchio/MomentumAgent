@@ -6,6 +6,21 @@ describe("readAIConfig", () => {
     expect(readAIConfig({})).toEqual({ provider: "rules" });
   });
 
+  it("uses OpenAI by default when an API key is configured", () => {
+    expect(readAIConfig({ OPENAI_API_KEY: " sk-test " })).toEqual({
+      provider: "openai",
+      apiKey: "sk-test",
+      model: "gpt-5-mini",
+      timeoutMs: 1500
+    });
+  });
+
+  it("keeps the rule-based interpreter when explicitly selected even with an API key", () => {
+    expect(readAIConfig({ AI_INTERPRETER_PROVIDER: "rules", OPENAI_API_KEY: "sk-test" })).toEqual({
+      provider: "rules"
+    });
+  });
+
   it("reads OpenAI interpreter settings", () => {
     expect(
       readAIConfig({

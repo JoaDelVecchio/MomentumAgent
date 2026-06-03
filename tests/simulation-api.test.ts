@@ -106,8 +106,9 @@ describe("local simulation API", () => {
 
     expect(nameResponse.json()).toEqual({
       kind: "reply",
-      text: "Turno confirmado para 2026-06-01T13:00:00.000Z. Te vamos a enviar el recordatorio antes del turno."
+      text: expect.stringContaining("Turno confirmado")
     });
+    expect(nameResponse.json().text).toContain("10:00");
   });
 
   it("returns audit events from simulated messages", async () => {
@@ -128,14 +129,22 @@ describe("local simulation API", () => {
     const response = await app.inject({ method: "GET", url: "/simulate/audit-log" });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual([
-      expect.objectContaining({
-        clinicId: "clinic_1",
-        conversationId: "conv_audit",
-        type: "intent.detected",
-        metadata: expect.objectContaining({ intent: "book", provider: "rules" })
-      })
-    ]);
+    expect(response.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          clinicId: "clinic_1",
+          conversationId: "conv_audit",
+          type: "intent.detected",
+          metadata: expect.objectContaining({ intent: "book", provider: "rules" })
+        }),
+        expect.objectContaining({
+          clinicId: "clinic_1",
+          conversationId: "conv_audit",
+          type: "agent.decision",
+          metadata: expect.objectContaining({ action: "search_slots", provider: "rules" })
+        })
+      ])
+    );
   });
 
   it("returns 400 for invalid inbound message payloads", async () => {
