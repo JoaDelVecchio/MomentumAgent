@@ -73,7 +73,12 @@ function isRoleSmalltalk(normalized: string) {
 function isServiceCatalogQuestion(normalized: string) {
   return (
     normalized.includes("que servicios ofrecen") ||
+    normalized.includes("que servicios tenes") ||
+    normalized.includes("que servicios tienen") ||
     normalized.includes("servicios ofrecen") ||
+    normalized.includes("servicios tenes") ||
+    normalized.includes("servicios tienen") ||
+    normalized.includes("que tratamientos tenes") ||
     normalized.includes("que tratamientos tienen") ||
     normalized.includes("tratamientos ofrecen")
   );

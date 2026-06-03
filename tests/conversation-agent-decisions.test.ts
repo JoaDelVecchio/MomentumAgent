@@ -35,6 +35,10 @@ describe("agent decision helpers", () => {
       kind: "reply",
       text: "Por ahora puedo ayudarte con: Botox."
     });
+    expect(buildNonTransactionalReply({ messageText: "que servicios tenes", clinicProfile: profile })).toEqual({
+      kind: "reply",
+      text: "Por ahora puedo ayudarte con: Botox."
+    });
   });
 
   it("does not intercept transactional booking text", () => {

@@ -100,6 +100,53 @@ describe("RulesConversationInterpreter", () => {
         confidence: 0.9
       })
     );
+
+    await expect(
+      interpreter.interpret({
+        clinicId: "clinic_1",
+        conversationId: "conv_1",
+        patientId: "pat_1",
+        messageText: "que servicios tenes",
+        now: new Date("2026-06-01T12:00:00.000Z")
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        provider: "rules",
+        intent: "services_catalog",
+        confidence: 0.9
+      })
+    );
+  });
+
+  it("uses pending booking context for availability questions without requiring the service again", async () => {
+    const result = await new RulesConversationInterpreter().interpret({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      messageText: "que turnos tene sel 7 de junio",
+      now: new Date("2026-06-03T12:00:00.000Z"),
+      clinicProfile: profile,
+      pendingBooking: {
+        serviceId: "svc_botox",
+        professionalId: "pro_perez",
+        startsAt: new Date("2026-06-03T16:00:00.000Z"),
+        endsAt: new Date("2026-06-03T16:30:00.000Z")
+      }
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: "rules",
+        intent: "slot_refinement",
+        confidence: 0.85,
+        serviceName: null,
+        requiresHuman: false,
+        normalizedTimePreference: expect.objectContaining({
+          from: new Date("2026-06-07T00:00:00.000Z"),
+          to: new Date("2026-06-08T00:00:00.000Z")
+        })
+      })
+    );
   });
 
   it("prioritizes operational intents over smalltalk and service catalog matches", async () => {

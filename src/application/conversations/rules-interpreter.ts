@@ -34,6 +34,21 @@ export class RulesConversationInterpreter implements ConversationInterpreter {
       };
     }
 
+    if (input.pendingBooking && isPendingAvailabilityQuestion(normalized)) {
+      const normalizedTimePreference = detectNormalizedTimePreference(normalized, input.now);
+      return {
+        provider: "rules",
+        intent: "slot_refinement",
+        confidence: 0.85,
+        serviceName: null,
+        timePreference: normalizedTimePreference ? input.messageText : null,
+        normalizedTimePreference,
+        requestedTopics: [],
+        requiresHuman: false,
+        reason: "Rule-based pending booking availability refinement matched."
+      };
+    }
+
     if (intent.type === "book") {
       return {
         provider: "rules",
@@ -63,7 +78,12 @@ export class RulesConversationInterpreter implements ConversationInterpreter {
 
     if (
       normalized.includes("que servicios ofrecen") ||
+      normalized.includes("que servicios tenes") ||
+      normalized.includes("que servicios tienen") ||
       normalized.includes("servicios ofrecen") ||
+      normalized.includes("servicios tenes") ||
+      normalized.includes("servicios tienen") ||
+      normalized.includes("que tratamientos tenes") ||
       normalized.includes("que tratamientos tienen") ||
       normalized.includes("tratamientos ofrecen")
     ) {
@@ -116,4 +136,125 @@ function detectRequestedTopics(text: string): RequestedTopic[] {
 
 function containsAny(text: string, candidates: string[]) {
   return candidates.some((candidate) => text.includes(candidate));
+}
+
+function isPendingAvailabilityQuestion(normalized: string) {
+  return (
+    containsAny(normalized, ["turno", "horario", "disponib", "agenda", "lugar"]) &&
+    containsAny(normalized, ["que", "tenes", "tienen", "hay", "para", "otro", "algo", "cuando"])
+  );
+}
+
+function detectNormalizedTimePreference(normalized: string, now: Date) {
+  const dateRange = detectDateRange(normalized, now);
+  const daypart = detectDaypart(normalized);
+  if (!dateRange && !daypart) {
+    return null;
+  }
+
+  return {
+    ...(dateRange ?? {}),
+    ...(daypart ? { daypart } : {})
+  };
+}
+
+function detectDaypart(normalized: string): "morning" | "afternoon" | "evening" | undefined {
+  if (containsAny(normalized, ["manana", "temprano"])) {
+    return "morning";
+  }
+  if (containsAny(normalized, ["tarde", "mediodia"])) {
+    return "afternoon";
+  }
+  if (containsAny(normalized, ["noche", "ultima hora"])) {
+    return "evening";
+  }
+  return undefined;
+}
+
+function detectDateRange(normalized: string, now: Date) {
+  const explicitMonth = normalized.match(
+    /\b(\d{1,2}) de (enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/
+  );
+  if (explicitMonth) {
+    return buildDayRange({
+      day: Number(explicitMonth[1]),
+      month: monthNumber(explicitMonth[2]),
+      year: now.getUTCFullYear(),
+      now,
+      rollPastDate: true
+    });
+  }
+
+  const numeric = normalized.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+  if (numeric) {
+    const parsedYear = numeric[3] ? Number(numeric[3]) : now.getUTCFullYear();
+    return buildDayRange({
+      day: Number(numeric[1]),
+      month: Number(numeric[2]) - 1,
+      year: parsedYear < 100 ? 2000 + parsedYear : parsedYear,
+      now,
+      rollPastDate: !numeric[3]
+    });
+  }
+
+  const dayOnly = normalized.match(/\b(?:el|dia|para) (\d{1,2})\b/);
+  if (dayOnly) {
+    return buildDayRange({
+      day: Number(dayOnly[1]),
+      month: now.getUTCMonth(),
+      year: now.getUTCFullYear(),
+      now,
+      rollPastDate: true,
+      rollByMonth: true
+    });
+  }
+
+  return undefined;
+}
+
+function buildDayRange(input: {
+  day: number;
+  month: number;
+  year: number;
+  now: Date;
+  rollPastDate: boolean;
+  rollByMonth?: boolean;
+}) {
+  if (input.day < 1 || input.day > 31 || input.month < 0 || input.month > 11) {
+    return undefined;
+  }
+
+  let from = new Date(Date.UTC(input.year, input.month, input.day));
+  if (
+    input.rollPastDate &&
+    from < new Date(Date.UTC(input.now.getUTCFullYear(), input.now.getUTCMonth(), input.now.getUTCDate()))
+  ) {
+    from = input.rollByMonth
+      ? new Date(Date.UTC(input.year, input.month + 1, input.day))
+      : new Date(Date.UTC(input.year + 1, input.month, input.day));
+  }
+  if (from.getUTCDate() !== input.day) {
+    return undefined;
+  }
+
+  return { from, to: new Date(from.getTime() + 24 * 60 * 60 * 1000) };
+}
+
+function monthNumber(month: string) {
+  const months: Record<string, number> = {
+    enero: 0,
+    febrero: 1,
+    marzo: 2,
+    abril: 3,
+    mayo: 4,
+    junio: 5,
+    julio: 6,
+    agosto: 7,
+    septiembre: 8,
+    setiembre: 8,
+    octubre: 9,
+    noviembre: 10,
+    diciembre: 11
+  };
+  return months[month] ?? -1;
 }

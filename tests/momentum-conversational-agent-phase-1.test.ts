@@ -8,6 +8,7 @@ import type {
   ConversationInterpreterInput,
   ConversationUnderstanding
 } from "../src/application/conversations/interpreter.js";
+import { RulesConversationInterpreter } from "../src/application/conversations/rules-interpreter.js";
 import { SchedulingService } from "../src/application/scheduling/scheduling-service.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
 
@@ -155,6 +156,66 @@ describe("Momentum Conversational Agent Phase 1", () => {
     expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual(
       pending
     );
+  });
+
+  it("handles natural follow-ups like a real conversation while a Botox offer is pending", async () => {
+    const { calendar, repos, workflow } = buildContext(new RulesConversationInterpreter());
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-03T16:00:00.000Z"), endsAt: new Date("2026-06-03T16:30:00.000Z") },
+      { startsAt: new Date("2026-06-07T14:00:00.000Z"), endsAt: new Date("2026-06-07T14:30:00.000Z") }
+    ]);
+
+    const offer = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_real",
+      patientId: "pat_real",
+      whatsappNumber: "+5491111111111",
+      text: "Hola, quiero reservar botox."
+    });
+    expect(offer.kind).toBe("reply");
+    expect(offer.text).toContain("2026-06-03T16:00:00.000Z");
+
+    const smalltalk = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_real",
+      patientId: "pat_real",
+      whatsappNumber: "+5491111111111",
+      text: "como te llamas"
+    });
+    expect(smalltalk).toEqual({
+      kind: "reply",
+      text: "Soy Momentum, el asistente de la clinica para ayudarte con informacion y turnos."
+    });
+
+    const dateFollowUp = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_real",
+      patientId: "pat_real",
+      whatsappNumber: "+5491111111111",
+      text: "que turnos tene sel 7 de junio"
+    });
+    expect(dateFollowUp.kind).toBe("reply");
+    expect(dateFollowUp.text).toContain("2026-06-07T14:00:00.000Z");
+    expect(dateFollowUp.text).not.toContain("No encontre ese tratamiento");
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_real" })?.pendingBooking).toEqual(
+      expect.objectContaining({
+        serviceId: "svc_botox",
+        startsAt: new Date("2026-06-07T14:00:00.000Z")
+      })
+    );
+
+    const catalog = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_real",
+      patientId: "pat_real",
+      whatsappNumber: "+5491111111111",
+      text: "que servicios tenes"
+    });
+    expect(catalog).toEqual({
+      kind: "reply",
+      text: "Por ahora puedo ayudarte con: Botox."
+    });
+    expect(repos.listAppointmentsByPatient("pat_real")).toEqual([]);
   });
 
   it("prioritizes medical safety over smalltalk during a pending offer", async () => {
