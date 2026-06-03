@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ClinicProfile } from "../../domain/types.js";
 import type { PendingBooking } from "../../ports/repositories.js";
+import type { ConversationState } from "./agent-state.js";
 
 export const requestedTopicSchema = z.enum([
   "price",
@@ -57,6 +58,7 @@ export type ConversationInterpreterInput = {
   now: Date;
   clinicProfile?: ClinicProfile;
   pendingBooking?: PendingBooking;
+  conversationState?: ConversationState;
 };
 
 export interface ConversationInterpreter {

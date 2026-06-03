@@ -95,10 +95,32 @@ describe("OpenAIConversationInterpreter", () => {
         professionalId: "pro_perez",
         startsAt: new Date("2026-06-01T13:00:00.000Z"),
         endsAt: new Date("2026-06-01T13:30:00.000Z")
+      },
+      conversationState: {
+        stage: "offering_slot",
+        hasPendingBooking: true,
+        pendingBookingKind: "new_booking",
+        selectedServiceId: "svc_botox",
+        selectedProfessionalId: "pro_perez",
+        offeredSlotStartsAt: "2026-06-01T13:00:00.000Z",
+        missingPatientFields: ["fullName"],
+        activeAppointmentCount: 0,
+        lastPatientMessage: "tenes algo a la tarde?"
       }
     });
 
     expect(result).toEqual(expect.objectContaining({ intent: "slot_refinement" }));
+    expect(JSON.parse(client.lastBody?.input ?? "{}").conversationState).toEqual({
+      stage: "offering_slot",
+      hasPendingBooking: true,
+      pendingBookingKind: "new_booking",
+      selectedServiceId: "svc_botox",
+      selectedProfessionalId: "pro_perez",
+      offeredSlotStartsAt: "2026-06-01T13:00:00.000Z",
+      missingPatientFields: ["fullName"],
+      activeAppointmentCount: 0,
+      lastPatientMessage: "tenes algo a la tarde?"
+    });
     expect(JSON.stringify(client.lastBody)).toContain("svc_botox");
     expect(JSON.stringify(client.lastBody)).toContain("Botox");
     expect(JSON.stringify(client.lastBody)).toContain("Dra. Perez");

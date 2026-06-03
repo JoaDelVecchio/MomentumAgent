@@ -235,6 +235,17 @@ describe("ConversationWorkflow", () => {
         metadata: expect.objectContaining({ intent: "book", provider: "rules" })
       })
     );
+    expect(await audit.list()).toContainEqual(
+      expect.objectContaining({
+        clinicId: "clinic_1",
+        conversationId: "conv_1",
+        type: "agent.decision",
+        metadata: expect.objectContaining({
+          action: "search_slots",
+          stage: "idle"
+        })
+      })
+    );
   });
 
   it("pauses the bot in the same chat when the patient asks for a human", async () => {

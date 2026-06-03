@@ -3,7 +3,8 @@ import type { AuditLogPort } from "../../ports/audit-log.js";
 import { CalendarInfrastructureError } from "../../ports/calendar.js";
 import type { Conversation, OperationalRepository, PendingBooking } from "../../ports/repositories.js";
 import type { SchedulingService } from "../scheduling/scheduling-service.js";
-import { buildNonTransactionalReply, isPendingSlotRefinementIntent } from "./agent-decisions.js";
+import { decideAgentAction, hasMedicalSafetyLanguage } from "./agent-router.js";
+import { buildConversationState, type ConversationState } from "./agent-state.js";
 import { buildFaqResponse, hasRequestedFaqTopic, missingConfiguredFaqResponse } from "./faq-response.js";
 import type { ConversationInterpreter, ConversationUnderstanding } from "./interpreter.js";
 import { normalizeText } from "./intent.js";
@@ -53,6 +54,17 @@ export class ConversationWorkflow {
     }
 
     const clinicProfile = await this.repos.getClinicProfile(input.clinicId);
+    const patient = await this.repos.getPatient(input.patientId);
+    const activeAppointments = (await this.repos.listAppointmentsByPatient(input.patientId)).filter(
+      (appointment) => appointment.clinicId === input.clinicId && appointment.status === "scheduled"
+    );
+    const conversationState = buildConversationState({
+      conversation,
+      clinicProfile,
+      patient,
+      activeAppointments,
+      messageText: input.text
+    });
     const intent = await this.interpreter.interpret({
       clinicId: input.clinicId,
       conversationId: input.conversationId,
@@ -60,7 +72,8 @@ export class ConversationWorkflow {
       messageText: input.text,
       now: this.now(),
       clinicProfile,
-      pendingBooking: conversation.pendingBooking
+      pendingBooking: conversation.pendingBooking,
+      conversationState
     });
     await this.audit.record({
       clinicId: input.clinicId,
@@ -78,75 +91,72 @@ export class ConversationWorkflow {
       }
     });
 
-    if (intent.requiresHuman || intent.intent === "medical_safety" || intent.intent === "handoff") {
-      return await this.pauseForHandoff(input);
-    }
-
-    if (hasMedicalSafetyLanguage(input.text)) {
-      return await this.pauseForHandoff(input);
-    }
-
-    const nonTransactionalReply = buildNonTransactionalReply({
+    const decision = decideAgentAction({
       messageText: input.text,
+      state: conversationState,
+      understanding: intent,
       clinicProfile
     });
-    if (nonTransactionalReply) {
-      return nonTransactionalReply;
-    }
-
-    const pendingBookingFaqResult = await this.tryAnswerPendingBookingQuestion(input, conversation, intent);
-    if (pendingBookingFaqResult) {
-      return pendingBookingFaqResult;
-    }
-
-    const pendingDataResult = await this.tryCompletePendingPatientData(input, conversation, intent);
-    if (pendingDataResult) {
-      return pendingDataResult;
-    }
-
-    if (isLowConfidenceSideEffectIntent(intent)) {
-      return {
-        kind: "reply",
-        text: "No llegue a entenderlo con seguridad. Decime si queres reservar, confirmar, cancelar o cambiar un turno."
-      };
-    }
-
-    if (conversation.pendingBooking && isPendingSlotRefinementIntent(intent)) {
-      return await this.handlePendingSlotRefinement(input, conversation, intent, clinicProfile);
-    }
-
-    if (intent.intent === "book") {
-      return await this.handleBookingIntent(input, intent);
-    }
-
-    if (intent.intent === "confirm") {
-      return await this.handleConfirmation(input, conversation);
-    }
-
-    if (intent.intent === "cancel") {
-      await this.clearPendingBooking(input.clinicId, input.conversationId);
-      return await this.handleCancelIntent(input);
-    }
-
-    if (intent.intent === "reschedule") {
-      await this.clearPendingBooking(input.clinicId, input.conversationId);
-      return await this.handleRescheduleIntent(input);
-    }
-
-    if (intent.intent === "question") {
-      const faq = buildFaqResponse(clinicProfile, intent);
-      if (faq) {
-        return { kind: "reply", text: faq };
+    await this.audit.record({
+      clinicId: input.clinicId,
+      conversationId: input.conversationId,
+      type: "agent.decision",
+      message: `Selected ${decision.action}`,
+      metadata: {
+        action: decision.action,
+        stage: decision.stage,
+        reason: decision.reason,
+        intent: intent.intent,
+        provider: intent.provider
       }
-      if (hasRequestedFaqTopic(intent) && !isMissingServiceForServiceFact(intent)) {
-        return { kind: "reply", text: missingConfiguredFaqResponse };
-      }
-    }
+    });
 
-    return {
-      kind: "reply",
-      text: "Te ayudo con informacion y turnos. Decime que tratamiento te interesa o si queres reservar, cancelar o cambiar un turno."
-    };
+    switch (decision.action) {
+      case "handoff":
+        return await this.pauseForHandoff(input);
+      case "reply_non_transactional":
+        return decision.reply ?? {
+          kind: "reply",
+          text: "Te ayudo con informacion y turnos. Decime que necesitas y lo vemos."
+        };
+      case "answer_pending_faq": {
+        const pendingBookingFaqResult = await this.tryAnswerPendingBookingQuestion(input, conversation, intent);
+        return pendingBookingFaqResult ?? { kind: "reply", text: missingConfiguredFaqResponse };
+      }
+      case "complete_pending_patient_data": {
+        const pendingDataResult = await this.tryCompletePendingPatientData(input, conversation, intent);
+        return pendingDataResult ?? { kind: "reply", text: buildContextualFallback(conversationState) };
+      }
+      case "clarify_low_confidence":
+        return {
+          kind: "reply",
+          text: "No llegue a entenderlo con seguridad. Decime si queres reservar, confirmar, cancelar o cambiar un turno."
+        };
+      case "refine_pending_slot":
+        return await this.handlePendingSlotRefinement(input, conversation, intent, clinicProfile);
+      case "search_slots":
+        return await this.handleBookingIntent(input, intent);
+      case "confirm_pending_booking":
+        return await this.handleConfirmation(input, conversation);
+      case "cancel_appointment":
+        await this.clearPendingBooking(input.clinicId, input.conversationId);
+        return await this.handleCancelIntent(input);
+      case "reschedule_appointment":
+        await this.clearPendingBooking(input.clinicId, input.conversationId);
+        return await this.handleRescheduleIntent(input);
+      case "answer_faq": {
+        const faq = buildFaqResponse(clinicProfile, intent);
+        if (faq) {
+          return { kind: "reply", text: faq };
+        }
+        if (hasRequestedFaqTopic(intent) && !isMissingServiceForServiceFact(intent)) {
+          return { kind: "reply", text: missingConfiguredFaqResponse };
+        }
+        return { kind: "reply", text: buildContextualFallback(conversationState) };
+      }
+      case "reply_contextual_fallback":
+        return { kind: "reply", text: buildContextualFallback(conversationState) };
+    }
   }
 
   private async pauseForHandoff(input: InboundMessage): Promise<WorkflowResult> {
@@ -557,19 +567,6 @@ function extractPendingPatientFullName(text: string, intent: ConversationUnderst
   return undefined;
 }
 
-function isLowConfidenceSideEffectIntent(intent: ConversationUnderstanding) {
-  if (intent.confidence >= SIDE_EFFECT_CONFIDENCE_THRESHOLD) {
-    return false;
-  }
-
-  return (
-    intent.intent === "book" ||
-    intent.intent === "confirm" ||
-    intent.intent === "cancel" ||
-    intent.intent === "reschedule"
-  );
-}
-
 function buildBookingFaqPrefix(profile: Parameters<typeof buildFaqResponse>[0], intent: ConversationUnderstanding) {
   if (!hasRequestedFaqTopic(intent)) {
     return "";
@@ -585,24 +582,6 @@ function isMissingServiceForServiceFact(intent: ConversationUnderstanding) {
 
   return intent.requestedTopics.some(
     (topic) => topic === "price" || topic === "duration" || topic === "preparation" || topic === "restrictions"
-  );
-}
-
-function hasMedicalSafetyLanguage(text: string) {
-  const normalized = normalizeText(text);
-  return (
-    normalized.includes("embaraz") ||
-    normalized.includes("me duele") ||
-    normalized.includes("dolor") ||
-    normalized.includes("sangrado") ||
-    normalized.includes("fiebre") ||
-    normalized.includes("infeccion") ||
-    normalized.includes("infectad") ||
-    normalized.includes("hinchad") ||
-    normalized.includes("reaccion") ||
-    normalized.includes("alerg") ||
-    normalized.includes("me recomendas") ||
-    normalized.includes("puedo hacerme")
   );
 }
 
@@ -636,4 +615,20 @@ function startOfDay(date: Date) {
 
 function addDays(date: Date, days: number) {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function buildContextualFallback(state: ConversationState) {
+  if (state.stage === "offering_slot" && state.missingPatientFields.includes("fullName")) {
+    return "Para confirmar el turno necesito nombre y apellido. Tambien puedo responderte dudas antes de confirmarlo.";
+  }
+  if (state.stage === "offering_slot") {
+    return "Te mantengo el horario ofrecido. Podes confirmarlo, pedirme otro horario o preguntarme algo del tratamiento.";
+  }
+  if (state.stage === "rescheduling") {
+    return "Te mantengo el nuevo horario ofrecido. Podes confirmarlo o pedirme otra opcion.";
+  }
+  if (state.stage === "booked") {
+    return "Tenes un turno activo. Puedo ayudarte a cambiarlo, cancelarlo o responder dudas del tratamiento.";
+  }
+  return "Te ayudo con informacion y turnos. Decime que tratamiento te interesa o si queres reservar, cancelar o cambiar un turno.";
 }

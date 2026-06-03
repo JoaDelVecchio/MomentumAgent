@@ -52,6 +52,9 @@ function buildContext(interpreter: ConversationInterpreter) {
   return { repos, calendar, audit, workflow };
 }
 
+const pendingNameFallback =
+  "Para confirmar el turno necesito nombre y apellido. Tambien puedo responderte dudas antes de confirmarlo.";
+
 function understanding(input: Partial<ConversationUnderstanding>): ConversationUnderstanding {
   return {
     provider: "openai",
@@ -486,7 +489,7 @@ describe("ConversationWorkflow with AI understanding", () => {
 
     expect(result).toEqual({
       kind: "reply",
-      text: "Te ayudo con informacion y turnos. Decime que tratamiento te interesa o si queres reservar, cancelar o cambiar un turno."
+      text: pendingNameFallback
     });
     expect(repos.getPatient("pat_1")?.fullName).toBeUndefined();
     expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
@@ -581,7 +584,7 @@ describe("ConversationWorkflow with AI understanding", () => {
 
     expect(result).toEqual({
       kind: "reply",
-      text: "Te ayudo con informacion y turnos. Decime que tratamiento te interesa o si queres reservar, cancelar o cambiar un turno."
+      text: pendingNameFallback
     });
     expect(repos.getPatient("pat_1")?.fullName).toBeUndefined();
     expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
@@ -617,7 +620,7 @@ describe("ConversationWorkflow with AI understanding", () => {
 
     expect(result).toEqual({
       kind: "reply",
-      text: "Te ayudo con informacion y turnos. Decime que tratamiento te interesa o si queres reservar, cancelar o cambiar un turno."
+      text: pendingNameFallback
     });
     expect(repos.getPatient("pat_1")?.fullName).toBeUndefined();
     expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
@@ -661,7 +664,7 @@ describe("ConversationWorkflow with AI understanding", () => {
 
     expect(result).toEqual({
       kind: "reply",
-      text: "Te ayudo con informacion y turnos. Decime que tratamiento te interesa o si queres reservar, cancelar o cambiar un turno."
+      text: pendingNameFallback
     });
     expect(repos.getPatient("pat_1")?.fullName).toBeUndefined();
     expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
