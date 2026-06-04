@@ -6,6 +6,7 @@ import { SchedulingService } from "../src/application/scheduling/scheduling-serv
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
 import { DomainError } from "../src/domain/errors.js";
 import type { Appointment } from "../src/domain/types.js";
+import type { AuditEvent, AuditEventInput } from "../src/ports/audit-log.js";
 import type { CalendarEvent, CalendarEventInput, FindFreeSlotsInput } from "../src/ports/calendar.js";
 
 class BlockingUpdateCalendar extends FakeCalendar {
@@ -68,6 +69,12 @@ class CapturingCalendar extends FakeCalendar {
 class FailingSaveRepository extends InMemoryRepositories {
   override saveAppointment(_appointment: Appointment) {
     throw new Error("database unavailable");
+  }
+}
+
+class FailingAuditLog extends InMemoryAuditLog {
+  override async record(_input: AuditEventInput): Promise<AuditEvent> {
+    throw new Error("audit unavailable");
   }
 }
 
@@ -389,6 +396,50 @@ describe("SchedulingService", () => {
     expect(appointment.status).toBe("scheduled");
     expect(repos.getAppointment(appointment.id)).toEqual(appointment);
     expect((await audit.list()).map((event) => event.type)).toContain("appointment.created");
+  });
+
+  it("does not fail a completed booking when audit logging is unavailable", async () => {
+    const repos = new InMemoryRepositories();
+    const calendar = new FakeCalendar();
+    const audit = new FailingAuditLog();
+    buildContext(calendar, () => new Date("2026-05-29T12:00:00.000Z"), repos);
+    const lock = repos.claimSlotLock({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      calendarId: "cal_perez",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      endsAt: new Date("2026-06-01T13:30:00.000Z"),
+      expiresAt: new Date("2026-06-01T13:10:00.000Z"),
+      now: new Date("2026-06-01T13:00:00.000Z")
+    });
+    const serviceWithFailingAudit = new SchedulingService(
+      repos,
+      calendar,
+      audit,
+      () => new Date("2026-05-29T12:00:00.000Z")
+    );
+
+    const appointment = await serviceWithFailingAudit.bookAppointment({
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      serviceId: "svc_botox",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      professionalId: "pro_perez",
+      conversationId: "conv_1",
+      slotLockId: lock?.id
+    });
+
+    expect(repos.getAppointment(appointment.id)).toEqual(appointment);
+    expect(
+      repos.listActiveSlotLocks({
+        clinicId: "clinic_1",
+        from: new Date("2026-06-01T13:00:00.000Z"),
+        to: new Date("2026-06-01T13:30:00.000Z"),
+        now: new Date("2026-06-01T13:00:00.000Z")
+      })
+    ).toEqual([]);
   });
 
   it("cancels a newly-created calendar event when appointment persistence fails", async () => {

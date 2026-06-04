@@ -598,6 +598,34 @@ describe("PrismaOperationalRepository core state", () => {
     ).resolves.toEqual([]);
   });
 
+  it("allows only one concurrent Prisma slot lock claim for the same slot", async () => {
+    const claimInput = {
+      clinicId: "clinic_1",
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      calendarId: "cal_perez",
+      startsAt: new Date("2026-06-02T13:00:00.000Z"),
+      endsAt: new Date("2026-06-02T13:30:00.000Z"),
+      expiresAt: new Date("2026-06-02T13:10:00.000Z"),
+      now: new Date("2026-06-02T13:00:00.000Z")
+    };
+
+    const results = await Promise.all([
+      repos.claimSlotLock({ ...claimInput, conversationId: "conv_concurrent_1" }),
+      repos.claimSlotLock({ ...claimInput, conversationId: "conv_concurrent_2" })
+    ]);
+
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(
+      await repos.listActiveSlotLocks({
+        clinicId: "clinic_1",
+        from: new Date("2026-06-02T13:00:00.000Z"),
+        to: new Date("2026-06-02T13:30:00.000Z"),
+        now: new Date("2026-06-02T13:00:00.000Z")
+      })
+    ).toHaveLength(1);
+  });
+
   it("serializes appointment lock operations in process", async () => {
     const events: string[] = [];
 

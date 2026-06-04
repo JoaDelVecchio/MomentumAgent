@@ -337,41 +337,54 @@ export class PrismaOperationalRepository implements OperationalRepository {
   }
 
   async claimSlotLock(input: ClaimSlotLockInput): Promise<SlotLock | undefined> {
-    return this.prisma.$transaction(async (tx) => {
-      const conflict = await tx.slotLock.findFirst({
-        where: {
-          clinicId: input.clinicId,
-          calendarId: input.calendarId,
-          status: "active",
-          expiresAt: { gt: input.now },
-          conversationId: { not: input.conversationId },
-          startsAt: { lt: input.endsAt },
-          endsAt: { gt: input.startsAt }
-        },
-        select: { id: true }
-      });
-      if (conflict) {
-        return undefined;
-      }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(
+          async (tx) => {
+            const conflict = await tx.slotLock.findFirst({
+              where: {
+                clinicId: input.clinicId,
+                calendarId: input.calendarId,
+                status: "active",
+                expiresAt: { gt: input.now },
+                conversationId: { not: input.conversationId },
+                startsAt: { lt: input.endsAt },
+                endsAt: { gt: input.startsAt }
+              },
+              select: { id: true }
+            });
+            if (conflict) {
+              return undefined;
+            }
 
-      const lock = await tx.slotLock.create({
-        data: {
-          id: `slotlock_${randomUUID()}`,
-          clinicId: input.clinicId,
-          conversationId: input.conversationId,
-          serviceId: input.serviceId,
-          professionalId: input.professionalId,
-          calendarId: input.calendarId,
-          startsAt: input.startsAt,
-          endsAt: input.endsAt,
-          expiresAt: input.expiresAt,
-          status: "active",
-          createdAt: input.now,
-          updatedAt: input.now
+            const lock = await tx.slotLock.create({
+              data: {
+                id: `slotlock_${randomUUID()}`,
+                clinicId: input.clinicId,
+                conversationId: input.conversationId,
+                serviceId: input.serviceId,
+                professionalId: input.professionalId,
+                calendarId: input.calendarId,
+                startsAt: input.startsAt,
+                endsAt: input.endsAt,
+                expiresAt: input.expiresAt,
+                status: "active",
+                createdAt: input.now,
+                updatedAt: input.now
+              }
+            });
+            return toSlotLock(lock);
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        );
+      } catch (error) {
+        if (!isPrismaTransactionConflict(error) || attempt === 2) {
+          throw error;
         }
-      });
-      return toSlotLock(lock);
-    });
+      }
+    }
+
+    return undefined;
   }
 
   async listActiveSlotLocks(input: ListActiveSlotLocksInput): Promise<SlotLock[]> {
@@ -1174,6 +1187,10 @@ function parseWorkingHours(json: string): WorkingWindow[] {
 
 function isPrismaUniqueConflict(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+function isPrismaTransactionConflict(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
 }
 
 async function withKeyedLock<T>(

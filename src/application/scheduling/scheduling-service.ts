@@ -148,7 +148,7 @@ export class SchedulingService {
       await this.calendar.cancelEvent(event.id, professional.calendarId).catch(() => undefined);
       throw error;
     }
-    await this.audit.record({
+    await this.recordAudit({
       clinicId: input.clinicId,
       conversationId: input.conversationId,
       type: "appointment.created",
@@ -156,7 +156,7 @@ export class SchedulingService {
       metadata: { appointmentId: appointment.id, calendarEventId: event.id }
     });
     if (input.slotLockId) {
-      await this.repos.consumeSlotLock({ lockId: input.slotLockId, now: this.now() });
+      await this.consumeSlotLock(input.slotLockId);
     }
 
     return appointment;
@@ -186,7 +186,7 @@ export class SchedulingService {
         }
         throw error;
       }
-      await this.audit.record({
+      await this.recordAudit({
         clinicId: input.clinicId,
         conversationId: input.conversationId,
         type: "appointment.cancelled",
@@ -284,7 +284,7 @@ export class SchedulingService {
         }
         throw error;
       }
-      await this.audit.record({
+      await this.recordAudit({
         clinicId: input.clinicId,
         conversationId: input.conversationId,
         type: "appointment.rescheduled",
@@ -292,7 +292,7 @@ export class SchedulingService {
         metadata: { appointmentId: appointment.id }
       });
       if (input.slotLockId) {
-        await this.repos.consumeSlotLock({ lockId: input.slotLockId, now: this.now() });
+        await this.consumeSlotLock(input.slotLockId);
       }
       await this.notifyFreedSlot(appointment);
 
@@ -316,6 +316,22 @@ export class SchedulingService {
 
   private minimumBookableStart(profile: ClinicProfile) {
     return addMinutes(this.now(), profile.appointmentRules.minimumNoticeMinutes);
+  }
+
+  private async recordAudit(input: Parameters<AuditLogPort["record"]>[0]) {
+    try {
+      await this.audit.record(input);
+    } catch {
+      // Scheduling state and patient-facing confirmation must not fail because audit logging is unavailable.
+    }
+  }
+
+  private async consumeSlotLock(slotLockId: string) {
+    try {
+      await this.repos.consumeSlotLock({ lockId: slotLockId, now: this.now() });
+    } catch {
+      // The appointment is already persisted; an unconsumed lock expires and must not turn success into failure.
+    }
   }
 
   private async assertNoBlockingSlotLock(input: {
