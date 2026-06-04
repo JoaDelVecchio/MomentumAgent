@@ -275,6 +275,46 @@ describe("ConversationWorkflow", () => {
     expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
   });
 
+  it("does not treat abusive pending-booking chatter as the patient full name", async () => {
+    const { calendar, repos, workflow } = buildContext();
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
+    ]);
+
+    await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Quiero reservar botox"
+    });
+    await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "si"
+    });
+    const pendingBooking = repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking;
+
+    const result = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "jero es un trolo"
+    });
+
+    expect(result.kind).toBe("reply");
+    expect(result.text).toContain("nombre y apellido");
+    expect(result.text).not.toContain("Turno confirmado");
+    expect(repos.getPatient("pat_1")?.fullName).toBeUndefined();
+    expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual(
+      pendingBooking
+    );
+  });
+
   it("answers the offered professional during a pending booking without treating the question as a name", async () => {
     const { calendar, repos, workflow } = buildContext();
     calendar.seedAvailability("cal_perez", [

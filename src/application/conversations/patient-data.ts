@@ -3,6 +3,8 @@ import { normalizeText } from "./intent.js";
 const BLOCKED_NAME_TOKENS = [
   "alcohol",
   "botox",
+  "boluda",
+  "boludo",
   "cancelar",
   "como",
   "confirmar",
@@ -12,13 +14,22 @@ const BLOCKED_NAME_TOKENS = [
   "cuesta",
   "doctor",
   "doctora",
+  "forra",
+  "forro",
   "forma",
+  "gil",
   "horario",
+  "idiota",
   "medico",
+  "mierda",
+  "pelotuda",
+  "pelotudo",
   "preparar",
   "prepararme",
   "precio",
   "profesional",
+  "puta",
+  "puto",
   "que",
   "quien",
   "reservar",
@@ -27,8 +38,26 @@ const BLOCKED_NAME_TOKENS = [
   "seria",
   "tiene",
   "tienen",
+  "trola",
+  "trolo",
   "turno",
   "vale"
+];
+
+const BLOCKED_NAME_EXACT_TOKENS = [
+  "anda",
+  "andan",
+  "estoy",
+  "es",
+  "hay",
+  "me",
+  "mi",
+  "quiero",
+  "soy",
+  "tengo",
+  "un",
+  "una",
+  "voy"
 ];
 
 export function extractLikelyPatientFullName(text: string): string | undefined {
@@ -67,6 +96,9 @@ function stripNameLeadIn(text: string) {
 
 function hasBlockedNameLanguage(normalized: string) {
   const tokens = normalized.split(" ");
+  if (BLOCKED_NAME_EXACT_TOKENS.some((blocked) => tokens.includes(blocked))) {
+    return true;
+  }
   return BLOCKED_NAME_TOKENS.some((blocked) =>
     tokens.some((token) => token === blocked || token.includes(blocked))
   );
