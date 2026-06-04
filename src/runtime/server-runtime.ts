@@ -141,7 +141,12 @@ export async function buildWhatsAppRuntime(input: {
         repos,
         provider,
         workflow,
-        audit
+        audit,
+        interactive: {
+          bookingFlowId: input.config.bookingFlowId,
+          bookingFlowCta: input.config.bookingFlowCta,
+          bookingFlowScreen: input.config.bookingFlowScreen
+        }
       })
     }
   };

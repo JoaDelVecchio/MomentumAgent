@@ -62,6 +62,89 @@ describe("Kapso webhook parsing", () => {
     expect(message.whatsappNumber).toBe("US.13491208655302741918");
   });
 
+  it("normalizes booking reply button taps into deterministic commands", () => {
+    const payload = kapsoReceivedMessagePayload() as any;
+    payload.message.type = "interactive";
+    payload.message.interactive = {
+      type: "button_reply",
+      button_reply: {
+        id: "booking_confirm",
+        title: "Confirmar"
+      }
+    };
+    delete payload.message.text;
+    delete payload.message.kapso.content;
+
+    const message = normalizeKapsoInboundMessage({
+      clinicId: "clinic_1",
+      idempotencyKey: "delivery_button",
+      payload
+    });
+
+    expect(message.text).toBe("confirmo");
+  });
+
+  it("normalizes interactive list selections using the selected row title", () => {
+    const payload = kapsoReceivedMessagePayload() as any;
+    payload.message.type = "interactive";
+    payload.message.interactive = {
+      type: "list_reply",
+      list_reply: {
+        id: "slot_1",
+        title: "Jue 4 09:00",
+        description: "Botox con Dra. Perez"
+      }
+    };
+    delete payload.message.text;
+    delete payload.message.kapso.content;
+
+    const message = normalizeKapsoInboundMessage({
+      clinicId: "clinic_1",
+      idempotencyKey: "delivery_list",
+      payload
+    });
+
+    expect(message.text).toBe("Jue 4 09:00");
+  });
+
+  it("normalizes completed Flow responses into deterministic commands", () => {
+    const payload = kapsoReceivedMessagePayload() as any;
+    payload.message.type = "interactive";
+    payload.message.interactive = {
+      type: "nfm_reply",
+      nfm_reply: {
+        name: "flow",
+        body: "Sent",
+        response_json: JSON.stringify({
+          flow_token: "clinic_1:conv_123:wamid_123",
+          action: "confirm_booking"
+        })
+      }
+    };
+    payload.message.kapso = {
+      direction: "inbound",
+      status: "received",
+      processing_status: "pending",
+      origin: "cloud_api",
+      has_media: false,
+      flow_response: {
+        flow_token: "clinic_1:conv_123:wamid_123",
+        action: "confirm_booking"
+      },
+      flow_token: "clinic_1:conv_123:wamid_123",
+      flow_name: "flow"
+    };
+    delete payload.message.text;
+
+    const message = normalizeKapsoInboundMessage({
+      clinicId: "clinic_1",
+      idempotencyKey: "delivery_flow",
+      payload
+    });
+
+    expect(message.text).toBe("confirmo");
+  });
+
   it("rejects malformed webhook payloads", () => {
     expect(() =>
       normalizeKapsoInboundMessage({
@@ -169,6 +252,102 @@ describe("WhatsAppInboundService", () => {
     expect(context.provider.sentTextMessages[0].text).toBe(
       "Te derivo con recepcion por este mismo chat."
     );
+  });
+
+  it("sends booking reply buttons when a reply leaves a pending booking", async () => {
+    const context = buildInboundServiceContext({
+      kind: "reply",
+      text: "Tengo este horario: jueves 4 de junio a las 09:00 para Botox. Si te sirve, lo confirmamos."
+    });
+    context.repos.saveConversation(conversationWithPendingBooking());
+
+    const result = await context.service.handleInboundMessage(normalizedInboundMessage());
+
+    expect(result).toEqual({
+      status: "sent",
+      workflowResult: "reply",
+      providerMessageId: "msg_1"
+    });
+    expect(context.provider.sentTextMessages).toEqual([]);
+    expect(context.provider.sentInteractiveMessages).toEqual([
+      {
+        clinicId: "clinic_1",
+        to: "16315551181",
+        kind: "button",
+        bodyText: "Tengo este horario: jueves 4 de junio a las 09:00 para Botox. Si te sirve, lo confirmamos.",
+        buttons: [
+          { id: "booking_confirm", title: "Confirmar" },
+          { id: "booking_change", title: "Otro horario" },
+          { id: "booking_handoff", title: "Recepcion" }
+        ],
+        providerMessageId: "msg_1"
+      }
+    ]);
+  });
+
+  it("sends a booking Flow CTA when a published Flow is configured", async () => {
+    const context = buildInboundServiceContext(
+      {
+        kind: "reply",
+        text: "Tengo este horario: jueves 4 de junio a las 09:00 para Botox. Si te sirve, lo confirmamos."
+      },
+      { bookingFlowId: "flow_booking_123", bookingFlowCta: "Ver turnos" }
+    );
+    context.repos.saveConversation(conversationWithPendingBooking());
+
+    const result = await context.service.handleInboundMessage(normalizedInboundMessage());
+
+    expect(result).toEqual({
+      status: "sent",
+      workflowResult: "reply",
+      providerMessageId: "msg_1"
+    });
+    expect(context.provider.sentTextMessages).toEqual([]);
+    expect(context.provider.sentInteractiveMessages).toEqual([
+      {
+        clinicId: "clinic_1",
+        to: "16315551181",
+        kind: "flow",
+        bodyText: "Tengo este horario: jueves 4 de junio a las 09:00 para Botox. Si te sirve, lo confirmamos.",
+        flowId: "flow_booking_123",
+        flowCta: "Ver turnos",
+        flowAction: "navigate",
+        flowToken: "clinic_1:conv_123:wamid_123",
+        flowActionPayload: {
+          screen: "BOOKING",
+          data: {
+            appointmentId: "",
+            conversationId: "conv_123",
+            serviceId: "svc_botox",
+            professionalId: "pro_perez",
+            startsAt: "2026-06-04T12:00:00.000Z",
+            endsAt: "2026-06-04T12:30:00.000Z",
+            slotLockId: "lock_1"
+          }
+        },
+        providerMessageId: "msg_1"
+      }
+    ]);
+  });
+
+  it("keeps patient-data collection replies as plain text", async () => {
+    const context = buildInboundServiceContext({
+      kind: "reply",
+      text: "Perfecto. Para confirmar el turno, pasame nombre y apellido."
+    });
+    context.repos.saveConversation(conversationWithPendingBooking());
+
+    await context.service.handleInboundMessage(normalizedInboundMessage());
+
+    expect(context.provider.sentTextMessages).toEqual([
+      {
+        clinicId: "clinic_1",
+        to: "16315551181",
+        text: "Perfecto. Para confirmar el turno, pasame nombre y apellido.",
+        providerMessageId: "msg_1"
+      }
+    ]);
+    expect(context.provider.sentInteractiveMessages).toEqual([]);
   });
 
   it("does not send automated replies when the conversation is already bot-paused", async () => {
@@ -427,7 +606,10 @@ function normalizedInboundMessage() {
   };
 }
 
-function buildInboundServiceContext(result: WorkflowResult & { delayMs?: number }) {
+function buildInboundServiceContext(
+  result: WorkflowResult & { delayMs?: number },
+  interactive?: { bookingFlowId?: string; bookingFlowCta?: string }
+) {
   const repos = new InMemoryRepositories();
   const provider = new FakeWhatsAppProvider();
   const audit = new InMemoryAuditLog();
@@ -436,10 +618,30 @@ function buildInboundServiceContext(result: WorkflowResult & { delayMs?: number 
     repos,
     provider,
     workflow,
-    audit
+    audit,
+    interactive
   });
 
   return { repos, provider, audit, workflow, service };
+}
+
+function conversationWithPendingBooking() {
+  return {
+    id: "conv_123",
+    clinicId: "clinic_1",
+    patientId: "whatsapp:16315551181",
+    botPaused: false,
+    pendingBooking: {
+      slotLockId: "lock_1",
+      slotLockExpiresAt: new Date("2026-06-04T11:40:00.000Z"),
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      startsAt: new Date("2026-06-04T12:00:00.000Z"),
+      endsAt: new Date("2026-06-04T12:30:00.000Z")
+    },
+    createdAt: new Date("2026-06-04T11:00:00.000Z"),
+    updatedAt: new Date("2026-06-04T11:30:00.000Z")
+  };
 }
 
 function buildWhatsAppWebhookApp(

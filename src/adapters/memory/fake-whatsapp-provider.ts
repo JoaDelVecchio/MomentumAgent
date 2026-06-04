@@ -1,4 +1,5 @@
 import {
+  type SendInteractiveMessageInput,
   type SendMessageResult,
   type SendTemplateMessageInput,
   type SendTextMessageInput,
@@ -14,9 +15,14 @@ export type SentTemplateMessage = SendTemplateMessageInput & {
   providerMessageId: string;
 };
 
+export type SentInteractiveMessage = SendInteractiveMessageInput & {
+  providerMessageId: string;
+};
+
 export class FakeWhatsAppProvider implements WhatsAppProvider {
   readonly sentTextMessages: SentTextMessage[] = [];
   readonly sentTemplateMessages: SentTemplateMessage[] = [];
+  readonly sentInteractiveMessages: SentInteractiveMessage[] = [];
 
   private counter = 0;
   private nextErrorMessage?: string;
@@ -39,6 +45,13 @@ export class FakeWhatsAppProvider implements WhatsAppProvider {
     return { providerMessageId };
   }
 
+  async sendInteractive(input: SendInteractiveMessageInput): Promise<SendMessageResult> {
+    this.throwIfNextSendShouldFail();
+    const providerMessageId = this.nextProviderMessageId();
+    this.sentInteractiveMessages.push({ ...cloneInteractiveInput(input), providerMessageId });
+    return { providerMessageId };
+  }
+
   failNextSend(message = "WhatsApp provider failed") {
     this.nextErrorMessage = message;
   }
@@ -57,4 +70,33 @@ export class FakeWhatsAppProvider implements WhatsAppProvider {
     this.counter += 1;
     return `msg_${this.counter}`;
   }
+}
+
+function cloneInteractiveInput(input: SendInteractiveMessageInput): SendInteractiveMessageInput {
+  if (input.kind === "button") {
+    return {
+      ...input,
+      buttons: input.buttons.map((button) => ({ ...button }))
+    };
+  }
+
+  if (input.kind === "list") {
+    return {
+      ...input,
+      sections: input.sections.map((section) => ({
+        ...section,
+        rows: section.rows.map((row) => ({ ...row }))
+      }))
+    };
+  }
+
+  return {
+    ...input,
+    flowActionPayload: input.flowActionPayload
+      ? {
+          ...input.flowActionPayload,
+          data: input.flowActionPayload.data ? { ...input.flowActionPayload.data } : undefined
+        }
+      : undefined
+  };
 }

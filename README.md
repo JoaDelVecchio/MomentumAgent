@@ -7,6 +7,7 @@ The product is not meant to be a generic chatbot. The core workflow is: understa
 ## What It Does
 
 - Receives patient and lead messages from WhatsApp.
+- Uses WhatsApp-native buttons, lists, and optional booking Flow CTAs when they reduce friction.
 - Understands booking, rescheduling, cancellation, confirmation, FAQ, opt-out, and handoff intent.
 - Answers approved questions about services, prices, duration, preparation, restrictions, payment, and insurance.
 - Reads real availability from calendar providers.
@@ -117,7 +118,7 @@ The repository includes `.env.example` with safe placeholders. These are the mai
 | Simulation | `ENABLE_SIMULATION_API`, `SIMULATION_CLINIC_ID`, `SIMULATION_CLINIC_TIMEZONE` |
 | AI | `AI_INTERPRETER_PROVIDER`, `AI_INTERPRETER_FALLBACK`, `AI_RESPONSE_COMPOSER`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_REASONING_EFFORT`, `OPENAI_TIMEOUT_MS` |
 | Calendar | `CALENDAR_PROVIDER`, `TOKEN_ENCRYPTION_KEY`, `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, `GOOGLE_CALENDAR_REDIRECT_URI`, `GOOGLE_CALENDAR_OAUTH_STATE_SECRET`, `GOOGLE_CALENDAR_SETUP_TOKEN` |
-| WhatsApp | `WHATSAPP_PROVIDER`, `KAPSO_API_KEY`, `KAPSO_WEBHOOK_SECRET`, `KAPSO_PHONE_NUMBER_ID`, `KAPSO_BUSINESS_ACCOUNT_ID`, `MOMENTUM_PUBLIC_WEBHOOK_URL` |
+| WhatsApp | `WHATSAPP_PROVIDER`, `KAPSO_API_KEY`, `KAPSO_WEBHOOK_SECRET`, `KAPSO_PHONE_NUMBER_ID`, `KAPSO_BUSINESS_ACCOUNT_ID`, `MOMENTUM_PUBLIC_WEBHOOK_URL`, `WHATSAPP_BOOKING_FLOW_ID`, `WHATSAPP_BOOKING_FLOW_CTA`, `WHATSAPP_BOOKING_FLOW_SCREEN` |
 | Web | `NEXT_PUBLIC_API_BASE_URL`, `MOMENTUM_API_BASE_URL` |
 
 Local development can run with the fake calendar and simulation API. Real Google Calendar, WhatsApp, OpenAI, cron, and production database credentials should only be configured through local `.env` files or the deployment provider's secret manager.
@@ -170,6 +171,10 @@ Required Google scopes:
 ### WhatsApp
 
 Set the WhatsApp provider to Kapso and configure Kapso credentials in a local secret file or hosted secret store. Register the webhook URL for incoming WhatsApp messages. Momentum verifies inbound signatures, stores delivery keys, and avoids duplicate side effects.
+
+When a WhatsApp conversation has a pending booking, Momentum sends reply buttons for `Confirmar`, `Otro horario`, and `Recepcion` instead of forcing the patient to type exact phrases. If `WHATSAPP_BOOKING_FLOW_ID` is configured with a published WhatsApp Flow id, Momentum sends a Flow CTA for the pending booking context. Leave it blank until the clinic has a published Flow; the button fallback remains active.
+
+Live availability inside a Flow requires a dynamic WhatsApp Flow data endpoint or a future multi-slot picker. Calendar writes still happen only through Momentum's scheduling workflow after validation.
 
 ### OpenAI
 

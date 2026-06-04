@@ -10,6 +10,7 @@ import { SchedulingService } from "../src/application/scheduling/scheduling-serv
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
 import type { AuditEvent, AuditEventInput, AuditLogPort } from "../src/ports/audit-log.js";
 import type {
+  SendInteractiveMessageInput,
   SendMessageResult,
   SendTemplateMessageInput,
   SendTextMessageInput
@@ -555,6 +556,10 @@ class BlockingWhatsAppProvider {
 
   async sendTemplate(_input: SendTemplateMessageInput): Promise<SendMessageResult> {
     throw new Error("Template messages are not used in this test");
+  }
+
+  async sendInteractive(_input: SendInteractiveMessageInput): Promise<SendMessageResult> {
+    throw new Error("Interactive messages are not used in this test");
   }
 
   async waitUntilSendStarted() {

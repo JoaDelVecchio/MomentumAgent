@@ -11,6 +11,9 @@ export type WhatsAppConfig =
       phoneNumberId: string;
       businessAccountId?: string;
       publicWebhookUrl?: string;
+      bookingFlowId?: string;
+      bookingFlowCta?: string;
+      bookingFlowScreen?: string;
     };
 
 export function readWhatsAppConfig(env: NodeJS.ProcessEnv): WhatsAppConfig {
@@ -36,6 +39,9 @@ export function readWhatsAppConfig(env: NodeJS.ProcessEnv): WhatsAppConfig {
       "KAPSO_PHONE_NUMBER_ID is required when WHATSAPP_PROVIDER=kapso"
     ),
     businessAccountId: optionalEnv(env.KAPSO_BUSINESS_ACCOUNT_ID),
-    publicWebhookUrl: optionalEnv(env.MOMENTUM_PUBLIC_WEBHOOK_URL)
+    publicWebhookUrl: optionalEnv(env.MOMENTUM_PUBLIC_WEBHOOK_URL),
+    bookingFlowId: optionalEnv(env.WHATSAPP_BOOKING_FLOW_ID),
+    bookingFlowCta: optionalEnv(env.WHATSAPP_BOOKING_FLOW_CTA),
+    bookingFlowScreen: optionalEnv(env.WHATSAPP_BOOKING_FLOW_SCREEN)
   };
 }

@@ -51,6 +51,38 @@ describe("FakeWhatsAppProvider", () => {
     ]);
   });
 
+  it("records interactive messages with deterministic provider ids", async () => {
+    const provider = new FakeWhatsAppProvider();
+
+    const result = await provider.sendInteractive({
+      clinicId: "clinic_1",
+      to: "+5491111111111",
+      kind: "button",
+      bodyText: "Tengo este horario para Botox. Si te sirve, lo confirmamos.",
+      buttons: [
+        { id: "booking_confirm", title: "Confirmar" },
+        { id: "booking_change", title: "Otro horario" },
+        { id: "booking_handoff", title: "Recepcion" }
+      ]
+    });
+
+    expect(result).toEqual({ providerMessageId: "msg_1" });
+    expect(provider.sentInteractiveMessages).toEqual([
+      {
+        clinicId: "clinic_1",
+        to: "+5491111111111",
+        kind: "button",
+        bodyText: "Tengo este horario para Botox. Si te sirve, lo confirmamos.",
+        buttons: [
+          { id: "booking_confirm", title: "Confirmar" },
+          { id: "booking_change", title: "Otro horario" },
+          { id: "booking_handoff", title: "Recepcion" }
+        ],
+        providerMessageId: "msg_1"
+      }
+    ]);
+  });
+
   it("can fail the next send with a provider error", async () => {
     const provider = new FakeWhatsAppProvider();
     provider.failNextSend("kapso unavailable");
@@ -216,6 +248,176 @@ describe("KapsoWhatsAppProvider", () => {
                 ]
               }
             ]
+          }
+        })
+      })
+    );
+  });
+
+  it("sends reply button messages through Kapso", async () => {
+    const fetch = vi.fn().mockResolvedValue(jsonResponse({ messages: [{ id: "wamid_button_1" }] }));
+    const provider = new KapsoWhatsAppProvider({
+      apiKey: "kapso_api_key",
+      phoneNumberId: "phone_number_123",
+      fetch
+    });
+
+    const result = await provider.sendInteractive({
+      clinicId: "clinic_1",
+      to: "+5491111111111",
+      kind: "button",
+      bodyText: "Tengo este horario para Botox. Si te sirve, lo confirmamos.",
+      buttons: [
+        { id: "booking_confirm", title: "Confirmar" },
+        { id: "booking_change", title: "Otro horario" },
+        { id: "booking_handoff", title: "Recepcion" }
+      ]
+    });
+
+    expect(result).toEqual({ providerMessageId: "wamid_button_1" });
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.kapso.ai/meta/whatsapp/v24.0/phone_number_123/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: "+5491111111111",
+          type: "interactive",
+          interactive: {
+            type: "button",
+            body: { text: "Tengo este horario para Botox. Si te sirve, lo confirmamos." },
+            action: {
+              buttons: [
+                { type: "reply", reply: { id: "booking_confirm", title: "Confirmar" } },
+                { type: "reply", reply: { id: "booking_change", title: "Otro horario" } },
+                { type: "reply", reply: { id: "booking_handoff", title: "Recepcion" } }
+              ]
+            }
+          }
+        })
+      })
+    );
+  });
+
+  it("sends list messages through Kapso", async () => {
+    const fetch = vi.fn().mockResolvedValue(jsonResponse({ messages: [{ id: "wamid_list_1" }] }));
+    const provider = new KapsoWhatsAppProvider({
+      apiKey: "kapso_api_key",
+      phoneNumberId: "phone_number_123",
+      fetch
+    });
+
+    const result = await provider.sendInteractive({
+      clinicId: "clinic_1",
+      to: "+5491111111111",
+      kind: "list",
+      bodyText: "Estos son los turnos disponibles.",
+      buttonText: "Ver turnos",
+      sections: [
+        {
+          title: "Disponibles",
+          rows: [
+            {
+              id: "slot_1",
+              title: "Jue 4 09:00",
+              description: "Botox con Dra. Perez"
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(result).toEqual({ providerMessageId: "wamid_list_1" });
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.kapso.ai/meta/whatsapp/v24.0/phone_number_123/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: "+5491111111111",
+          type: "interactive",
+          interactive: {
+            type: "list",
+            body: { text: "Estos son los turnos disponibles." },
+            action: {
+              button: "Ver turnos",
+              sections: [
+                {
+                  title: "Disponibles",
+                  rows: [
+                    {
+                      id: "slot_1",
+                      title: "Jue 4 09:00",
+                      description: "Botox con Dra. Perez"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        })
+      })
+    );
+  });
+
+  it("sends flow CTA messages through Kapso", async () => {
+    const fetch = vi.fn().mockResolvedValue(jsonResponse({ messages: [{ id: "wamid_flow_1" }] }));
+    const provider = new KapsoWhatsAppProvider({
+      apiKey: "kapso_api_key",
+      phoneNumberId: "phone_number_123",
+      fetch
+    });
+
+    const result = await provider.sendInteractive({
+      clinicId: "clinic_1",
+      to: "+5491111111111",
+      kind: "flow",
+      bodyText: "Podes ver el horario y confirmarlo aca.",
+      flowId: "flow_booking_123",
+      flowToken: "clinic_1:conv_123:wamid_123",
+      flowCta: "Ver turnos",
+      flowAction: "navigate",
+      flowActionPayload: {
+        screen: "BOOKING",
+        data: {
+          serviceId: "svc_botox",
+          startsAt: "2026-06-04T12:00:00.000Z"
+        }
+      }
+    });
+
+    expect(result).toEqual({ providerMessageId: "wamid_flow_1" });
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.kapso.ai/meta/whatsapp/v24.0/phone_number_123/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: "+5491111111111",
+          type: "interactive",
+          interactive: {
+            type: "flow",
+            body: { text: "Podes ver el horario y confirmarlo aca." },
+            action: {
+              name: "flow",
+              parameters: {
+                flow_message_version: "3",
+                flow_token: "clinic_1:conv_123:wamid_123",
+                flow_id: "flow_booking_123",
+                flow_cta: "Ver turnos",
+                flow_action: "navigate",
+                flow_action_payload: {
+                  screen: "BOOKING",
+                  data: {
+                    serviceId: "svc_botox",
+                    startsAt: "2026-06-04T12:00:00.000Z"
+                  }
+                }
+              }
+            }
           }
         })
       })

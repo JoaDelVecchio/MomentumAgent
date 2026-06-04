@@ -1,6 +1,10 @@
 import type { AuditLogPort } from "../../ports/audit-log.js";
-import type { NormalizedWhatsAppInboundMessage, WhatsAppProvider } from "../../ports/messaging.js";
-import type { OperationalRepository } from "../../ports/repositories.js";
+import type {
+  NormalizedWhatsAppInboundMessage,
+  SendInteractiveMessageInput,
+  WhatsAppProvider
+} from "../../ports/messaging.js";
+import type { Conversation, OperationalRepository, PendingBooking } from "../../ports/repositories.js";
 import type { WorkflowResult } from "../conversations/conversation-workflow.js";
 
 type ConversationWorkflowPort = {
@@ -18,7 +22,15 @@ export type WhatsAppInboundServiceOptions = {
   provider: WhatsAppProvider;
   workflow: ConversationWorkflowPort;
   audit: AuditLogPort;
+  interactive?: WhatsAppInboundInteractiveOptions;
 };
+
+export type WhatsAppInboundInteractiveOptions = {
+  bookingFlowId?: string;
+  bookingFlowCta?: string;
+  bookingFlowScreen?: string;
+};
+
 
 export type WhatsAppInboundResult =
   | { status: "sent"; workflowResult: WorkflowResult["kind"]; providerMessageId: string }
@@ -88,7 +100,7 @@ export class WhatsAppInboundService {
       throw error;
     }
 
-    const sendResult = await this.sendTextOrMarkReadyForRetry(message, workflowResult.text);
+    const sendResult = await this.sendWorkflowResultOrMarkReadyForRetry(message, workflowResult);
 
     await this.markProcessedWebhookDelivery(message, sendResult.providerMessageId);
     await this.auditOutboundSent(message, workflowResult.kind, sendResult.providerMessageId);
@@ -108,7 +120,10 @@ export class WhatsAppInboundService {
       throw new Error(`Webhook delivery ${message.idempotencyKey} is missing persisted response data`);
     }
 
-    const sendResult = await this.sendTextOrMarkReadyForRetry(message, delivery.responseText);
+    const sendResult = await this.sendWorkflowResultOrMarkReadyForRetry(message, {
+      kind: delivery.workflowResult,
+      text: delivery.responseText
+    });
 
     await this.markProcessedWebhookDelivery(message, sendResult.providerMessageId);
     await this.auditOutboundSent(message, delivery.workflowResult, sendResult.providerMessageId);
@@ -120,18 +135,71 @@ export class WhatsAppInboundService {
     };
   }
 
-  private async sendTextOrMarkReadyForRetry(message: NormalizedWhatsAppInboundMessage, text: string) {
+  private async sendWorkflowResultOrMarkReadyForRetry(
+    message: NormalizedWhatsAppInboundMessage,
+    workflowResult: WorkflowResult
+  ) {
     try {
-      return await this.options.provider.sendText({
-        clinicId: message.clinicId,
-        to: message.whatsappNumber,
-        text
-      });
+      return await this.sendWorkflowResult(message, workflowResult);
     } catch (error) {
       await this.markWebhookDeliveryReadyForRetry(message);
       await this.auditOutboundFailed(message);
       throw error;
     }
+  }
+
+  private async sendWorkflowResult(message: NormalizedWhatsAppInboundMessage, workflowResult: WorkflowResult) {
+    const interaction = await this.buildBookingInteraction(message, workflowResult);
+    if (interaction) {
+      return await this.options.provider.sendInteractive(interaction);
+    }
+
+    return await this.options.provider.sendText({
+      clinicId: message.clinicId,
+      to: message.whatsappNumber,
+      text: workflowResult.text
+    });
+  }
+
+  private async buildBookingInteraction(
+    message: NormalizedWhatsAppInboundMessage,
+    workflowResult: WorkflowResult
+  ): Promise<SendInteractiveMessageInput | undefined> {
+    if (workflowResult.kind !== "reply" || !isEligibleBookingInteractionText(workflowResult.text)) {
+      return undefined;
+    }
+
+    const conversation = await this.options.repos.getConversation({
+      clinicId: message.clinicId,
+      conversationId: message.conversationId
+    });
+    if (!conversation?.pendingBooking) {
+      return undefined;
+    }
+
+    if (this.options.interactive?.bookingFlowId) {
+      return buildBookingFlowMessage({
+        message,
+        conversation,
+        pendingBooking: conversation.pendingBooking,
+        bodyText: workflowResult.text,
+        flowId: this.options.interactive.bookingFlowId,
+        flowCta: this.options.interactive.bookingFlowCta ?? "Ver turnos",
+        screen: this.options.interactive.bookingFlowScreen ?? "BOOKING"
+      });
+    }
+
+    return {
+      clinicId: message.clinicId,
+      to: message.whatsappNumber,
+      kind: "button",
+      bodyText: workflowResult.text,
+      buttons: [
+        { id: "booking_confirm", title: "Confirmar" },
+        { id: "booking_change", title: "Otro horario" },
+        { id: "booking_handoff", title: "Recepcion" }
+      ]
+    };
   }
 
   private async markWebhookDeliveryReadyForRetry(message: NormalizedWhatsAppInboundMessage) {
@@ -238,4 +306,77 @@ export class WhatsAppInboundService {
       }
     });
   }
+}
+
+function buildBookingFlowMessage(input: {
+  message: NormalizedWhatsAppInboundMessage;
+  conversation: Conversation;
+  pendingBooking: PendingBooking;
+  bodyText: string;
+  flowId: string;
+  flowCta: string;
+  screen: string;
+}): SendInteractiveMessageInput {
+  return {
+    clinicId: input.message.clinicId,
+    to: input.message.whatsappNumber,
+    kind: "flow",
+    bodyText: input.bodyText,
+    flowId: input.flowId,
+    flowCta: limitFlowCta(input.flowCta),
+    flowAction: "navigate",
+    flowToken: buildFlowToken(input.message),
+    flowActionPayload: {
+      screen: input.screen,
+      data: {
+        appointmentId: input.pendingBooking.appointmentId ?? "",
+        conversationId: input.conversation.id,
+        serviceId: input.pendingBooking.serviceId,
+        professionalId: input.pendingBooking.professionalId,
+        startsAt: input.pendingBooking.startsAt.toISOString(),
+        endsAt: input.pendingBooking.endsAt.toISOString(),
+        slotLockId: input.pendingBooking.slotLockId ?? ""
+      }
+    }
+  };
+}
+
+function buildFlowToken(message: NormalizedWhatsAppInboundMessage) {
+  return `${message.clinicId}:${message.conversationId}:${message.providerMessageId}`
+    .replace(/[^a-zA-Z0-9:_-]/g, "_")
+    .slice(0, 200);
+}
+
+function limitFlowCta(flowCta: string) {
+  const trimmed = flowCta.trim();
+  if (trimmed.length <= 20) {
+    return trimmed || "Ver turnos";
+  }
+  return trimmed.slice(0, 20).trimEnd() || "Ver turnos";
+}
+
+function isEligibleBookingInteractionText(text: string) {
+  const normalized = normalizeForInteraction(text);
+  if (!normalized) {
+    return false;
+  }
+
+  return !(
+    normalized.includes("nombre y apellido") ||
+    normalized.includes("pasame nombre") ||
+    normalized.includes("turno confirmado") ||
+    normalized.includes("turno reprogramado") ||
+    normalized.includes("turno cancelado") ||
+    normalized.includes("no encontre ese tratamiento") ||
+    normalized.includes("no pude encontrar el tratamiento")
+  );
+}
+
+function normalizeForInteraction(text: string) {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }

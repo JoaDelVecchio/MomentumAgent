@@ -1,4 +1,5 @@
 import type {
+  SendInteractiveMessageInput,
   SendMessageResult,
   SendTemplateMessageInput,
   SendTextMessageInput,
@@ -59,6 +60,16 @@ export class KapsoWhatsAppProvider implements WhatsAppProvider {
     });
   }
 
+  async sendInteractive(input: SendInteractiveMessageInput): Promise<SendMessageResult> {
+    return this.send({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: input.to,
+      type: "interactive",
+      interactive: buildInteractiveMessagePayload(input)
+    });
+  }
+
   private async send(payload: unknown): Promise<SendMessageResult> {
     let response: Response;
     try {
@@ -95,6 +106,63 @@ export class KapsoWhatsAppProvider implements WhatsAppProvider {
   private messageEndpoint() {
     return `${this.baseUrl.replace(/\/$/, "")}/v24.0/${this.config.phoneNumberId}/messages`;
   }
+}
+
+function buildInteractiveMessagePayload(input: SendInteractiveMessageInput) {
+  const base = {
+    body: { text: input.bodyText },
+    ...(input.footerText ? { footer: { text: input.footerText } } : {})
+  };
+
+  if (input.kind === "button") {
+    return {
+      type: "button",
+      ...base,
+      action: {
+        buttons: input.buttons.map((button) => ({
+          type: "reply",
+          reply: {
+            id: button.id,
+            title: button.title
+          }
+        }))
+      }
+    };
+  }
+
+  if (input.kind === "list") {
+    return {
+      type: "list",
+      ...base,
+      action: {
+        button: input.buttonText,
+        sections: input.sections.map((section) => ({
+          ...(section.title ? { title: section.title } : {}),
+          rows: section.rows.map((row) => ({
+            id: row.id,
+            title: row.title,
+            ...(row.description ? { description: row.description } : {})
+          }))
+        }))
+      }
+    };
+  }
+
+  return {
+    type: "flow",
+    ...base,
+    action: {
+      name: "flow",
+      parameters: {
+        flow_message_version: input.flowMessageVersion ?? "3",
+        ...(input.flowToken ? { flow_token: input.flowToken } : {}),
+        flow_id: input.flowId,
+        flow_cta: input.flowCta,
+        flow_action: input.flowAction ?? "navigate",
+        ...(input.flowActionPayload ? { flow_action_payload: input.flowActionPayload } : {})
+      }
+    }
+  };
 }
 
 async function readJsonResponse(response: Response): Promise<unknown> {
