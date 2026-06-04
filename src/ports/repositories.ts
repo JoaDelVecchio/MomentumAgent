@@ -4,6 +4,8 @@ export type MaybePromise<T> = T | Promise<T>;
 
 export type PendingBooking = {
   appointmentId?: Id;
+  slotLockId?: Id;
+  slotLockExpiresAt?: Date;
   serviceId: Id;
   professionalId: Id;
   startsAt: Date;
@@ -110,6 +112,40 @@ export type ListScheduledAppointmentsInput = {
   to: Date;
 };
 
+export type SlotLockStatus = "active" | "released" | "consumed";
+
+export type SlotLock = {
+  id: Id;
+  clinicId: Id;
+  conversationId: Id;
+  serviceId: Id;
+  professionalId: Id;
+  calendarId: Id;
+  startsAt: Date;
+  endsAt: Date;
+  expiresAt: Date;
+  status: SlotLockStatus;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type ClaimSlotLockInput = Omit<SlotLock, "id" | "status" | "createdAt" | "updatedAt"> & {
+  now: Date;
+};
+
+export type ListActiveSlotLocksInput = {
+  clinicId: Id;
+  from: Date;
+  to: Date;
+  now: Date;
+  excludeConversationId?: Id;
+};
+
+export type SlotLockMutationInput = {
+  lockId: Id;
+  now: Date;
+};
+
 export type ConversationByPatientLookup = {
   clinicId: Id;
   patientId: Id;
@@ -124,6 +160,10 @@ export interface OperationalRepository {
   getConversation(lookup: ConversationLookup): MaybePromise<Conversation | undefined>;
   saveAppointment(appointment: Appointment): MaybePromise<void>;
   nextAppointmentId(): MaybePromise<Id>;
+  claimSlotLock(input: ClaimSlotLockInput): MaybePromise<SlotLock | undefined>;
+  listActiveSlotLocks(input: ListActiveSlotLocksInput): MaybePromise<SlotLock[]>;
+  releaseSlotLock(input: SlotLockMutationInput): MaybePromise<void>;
+  consumeSlotLock(input: SlotLockMutationInput): MaybePromise<void>;
   withAppointmentLock<T>(appointmentId: Id, operation: () => Promise<T>): Promise<T>;
   withConversationLock<T>(conversationId: Id, operation: () => Promise<T>): Promise<T>;
   withWebhookDeliveryLock<T>(idempotencyKey: string, operation: () => Promise<T>): Promise<T>;

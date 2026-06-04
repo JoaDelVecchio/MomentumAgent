@@ -226,6 +226,139 @@ describe("SchedulingService", () => {
     });
   });
 
+  it("hides active slot locks from other conversations", async () => {
+    const { repos, service } = buildContext();
+    await repos.claimSlotLock({
+      clinicId: "clinic_1",
+      conversationId: "conv_other",
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      calendarId: "cal_perez",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      endsAt: new Date("2026-06-01T13:30:00.000Z"),
+      expiresAt: new Date("2026-06-01T13:10:00.000Z"),
+      now: new Date("2026-06-01T13:00:00.000Z")
+    });
+
+    await expect(
+      service.findSlots({
+        clinicId: "clinic_1",
+        serviceId: "svc_botox",
+        from: new Date("2026-06-01T12:00:00.000Z"),
+        to: new Date("2026-06-01T15:00:00.000Z"),
+        conversationId: "conv_1"
+      })
+    ).resolves.toEqual([]);
+
+    await expect(
+      service.findSlots({
+        clinicId: "clinic_1",
+        serviceId: "svc_botox",
+        from: new Date("2026-06-01T12:00:00.000Z"),
+        to: new Date("2026-06-01T15:00:00.000Z"),
+        conversationId: "conv_other"
+      })
+    ).resolves.toEqual([
+      {
+        calendarId: "cal_perez",
+        startsAt: new Date("2026-06-01T13:00:00.000Z"),
+        endsAt: new Date("2026-06-01T13:30:00.000Z")
+      }
+    ]);
+  });
+
+  it("does not hide expired slot locks", async () => {
+    const { repos, service } = buildContext();
+    await repos.claimSlotLock({
+      clinicId: "clinic_1",
+      conversationId: "conv_other",
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      calendarId: "cal_perez",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      endsAt: new Date("2026-06-01T13:30:00.000Z"),
+      expiresAt: new Date("2026-05-29T11:30:00.000Z"),
+      now: new Date("2026-05-29T11:00:00.000Z")
+    });
+
+    await expect(
+      service.findSlots({
+        clinicId: "clinic_1",
+        serviceId: "svc_botox",
+        from: new Date("2026-06-01T12:00:00.000Z"),
+        to: new Date("2026-06-01T15:00:00.000Z"),
+        conversationId: "conv_1"
+      })
+    ).resolves.toEqual([
+      {
+        calendarId: "cal_perez",
+        startsAt: new Date("2026-06-01T13:00:00.000Z"),
+        endsAt: new Date("2026-06-01T13:30:00.000Z")
+      }
+    ]);
+  });
+
+  it("rejects booking slots locked by another conversation", async () => {
+    const { repos, service } = buildContext();
+    await repos.claimSlotLock({
+      clinicId: "clinic_1",
+      conversationId: "conv_other",
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      calendarId: "cal_perez",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      endsAt: new Date("2026-06-01T13:30:00.000Z"),
+      expiresAt: new Date("2026-06-01T13:10:00.000Z"),
+      now: new Date("2026-06-01T13:00:00.000Z")
+    });
+
+    await expect(
+      service.bookAppointment({
+        clinicId: "clinic_1",
+        patientId: "pat_1",
+        serviceId: "svc_botox",
+        startsAt: new Date("2026-06-01T13:00:00.000Z"),
+        professionalId: "pro_perez",
+        conversationId: "conv_1"
+      })
+    ).rejects.toThrow("Selected slot is no longer available");
+  });
+
+  it("allows booking with the owning slot lock and consumes it", async () => {
+    const { repos, service } = buildContext();
+    const lock = await repos.claimSlotLock({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      calendarId: "cal_perez",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      endsAt: new Date("2026-06-01T13:30:00.000Z"),
+      expiresAt: new Date("2026-06-01T13:10:00.000Z"),
+      now: new Date("2026-06-01T13:00:00.000Z")
+    });
+
+    const appointment = await service.bookAppointment({
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      serviceId: "svc_botox",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      professionalId: "pro_perez",
+      conversationId: "conv_1",
+      slotLockId: lock?.id
+    });
+
+    expect(appointment.status).toBe("scheduled");
+    expect(
+      await repos.listActiveSlotLocks({
+        clinicId: "clinic_1",
+        from: new Date("2026-06-01T13:00:00.000Z"),
+        to: new Date("2026-06-01T13:30:00.000Z"),
+        now: new Date("2026-06-01T13:00:00.000Z")
+      })
+    ).toEqual([]);
+  });
+
   it("returns no slots without querying the calendar when minimum notice inverts the search window", async () => {
     const calendar = new CapturingFindSlotsCalendar();
     const { service } = buildContext(calendar, () => new Date("2026-06-01T12:00:00.000Z"));

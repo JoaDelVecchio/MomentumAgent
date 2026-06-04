@@ -11,6 +11,7 @@ type BookAppointmentInput = {
   startsAt: Date;
   professionalId: string;
   conversationId?: string;
+  slotLockId?: string;
 };
 
 export type FreedSlotHandler = {
@@ -37,6 +38,7 @@ export class SchedulingService {
     from: Date;
     to: Date;
     professionalId?: string;
+    conversationId?: string;
   }): Promise<CalendarSlot[]> {
     const profile = await this.requireProfile(input.clinicId);
     const service = profile.services.find((candidate) => candidate.id === input.serviceId);
@@ -56,13 +58,25 @@ export class SchedulingService {
       return [];
     }
 
-    return this.calendar.findFreeSlots({
+    const slots = await this.calendar.findFreeSlots({
       calendarIds: professionals.map((professional) => professional.calendarId),
       from,
       to: input.to,
       durationMinutes,
       availabilityContext: buildAvailabilityContext(profile, professionals, service.durationMinutes)
     });
+    const activeLocks = await this.repos.listActiveSlotLocks({
+      clinicId: input.clinicId,
+      from,
+      to: input.to,
+      now: this.now(),
+      excludeConversationId: input.conversationId
+    });
+
+    return slots.filter(
+      (slot) =>
+        !activeLocks.some((lock) => lock.calendarId === slot.calendarId && overlaps(lock, slot))
+    );
   }
 
   async bookAppointment(input: BookAppointmentInput): Promise<Appointment> {
@@ -83,6 +97,14 @@ export class SchedulingService {
     if (startsAt < this.minimumBookableStart(profile)) {
       throw new DomainError("Selected slot is no longer available");
     }
+    await this.assertNoBlockingSlotLock({
+      clinicId: input.clinicId,
+      calendarId: professional.calendarId,
+      startsAt,
+      endsAt: calendarEndsAt,
+      conversationId: input.conversationId,
+      unavailableMessage: "Selected slot is no longer available"
+    });
     const slots = await this.calendar.findFreeSlots({
       calendarIds: [professional.calendarId],
       from: startsAt,
@@ -133,6 +155,9 @@ export class SchedulingService {
       message: "Created appointment",
       metadata: { appointmentId: appointment.id, calendarEventId: event.id }
     });
+    if (input.slotLockId) {
+      await this.repos.consumeSlotLock({ lockId: input.slotLockId, now: this.now() });
+    }
 
     return appointment;
   }
@@ -178,6 +203,7 @@ export class SchedulingService {
     appointmentId: string;
     startsAt: Date;
     conversationId?: string;
+    slotLockId?: string;
   }): Promise<Appointment> {
     return this.repos.withAppointmentLock(input.appointmentId, async () => {
       const appointment = await this.repos.getAppointment(input.appointmentId);
@@ -207,6 +233,14 @@ export class SchedulingService {
       if (startsAt < this.minimumBookableStart(profile)) {
         throw new DomainError("Selected reschedule slot is no longer available");
       }
+      await this.assertNoBlockingSlotLock({
+        clinicId: input.clinicId,
+        calendarId: eventCalendarId,
+        startsAt,
+        endsAt: calendarEndsAt,
+        conversationId: input.conversationId,
+        unavailableMessage: "Selected reschedule slot is no longer available"
+      });
       const slots = await this.calendar.findFreeSlots({
         calendarIds: [eventCalendarId],
         from: startsAt,
@@ -257,6 +291,9 @@ export class SchedulingService {
         message: "Rescheduled appointment",
         metadata: { appointmentId: appointment.id }
       });
+      if (input.slotLockId) {
+        await this.repos.consumeSlotLock({ lockId: input.slotLockId, now: this.now() });
+      }
       await this.notifyFreedSlot(appointment);
 
       return updated;
@@ -279,6 +316,26 @@ export class SchedulingService {
 
   private minimumBookableStart(profile: ClinicProfile) {
     return addMinutes(this.now(), profile.appointmentRules.minimumNoticeMinutes);
+  }
+
+  private async assertNoBlockingSlotLock(input: {
+    clinicId: string;
+    calendarId: string;
+    startsAt: Date;
+    endsAt: Date;
+    conversationId?: string;
+    unavailableMessage: string;
+  }) {
+    const activeLocks = await this.repos.listActiveSlotLocks({
+      clinicId: input.clinicId,
+      from: input.startsAt,
+      to: input.endsAt,
+      now: this.now(),
+      excludeConversationId: input.conversationId
+    });
+    if (activeLocks.some((lock) => lock.calendarId === input.calendarId && overlaps(lock, input))) {
+      throw new DomainError(input.unavailableMessage);
+    }
   }
 
   private async notifyFreedSlot(appointment: Appointment): Promise<void> {
@@ -357,6 +414,10 @@ function addMinutes(date: Date, minutes: number) {
 
 function maxDate(first: Date, second: Date) {
   return first > second ? first : second;
+}
+
+function overlaps(first: { startsAt: Date; endsAt: Date }, second: { startsAt: Date; endsAt: Date }) {
+  return first.startsAt.getTime() < second.endsAt.getTime() && first.endsAt.getTime() > second.startsAt.getTime();
 }
 
 function appointmentToSlot(appointment: Appointment): TimeSlot {

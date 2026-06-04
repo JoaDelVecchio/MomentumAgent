@@ -12,6 +12,10 @@ import type {
   PatientInterest,
   PendingBooking,
   ProcessedWebhookDeliveryInput,
+  ClaimSlotLockInput,
+  ListActiveSlotLocksInput,
+  SlotLock,
+  SlotLockMutationInput,
   WebhookDeliveryClaim,
   WebhookDeliveryOutcomeInput,
   WebhookDeliveryRecord
@@ -24,11 +28,13 @@ export class InMemoryRepositories implements OperationalRepository {
   private patients = new Map<Id, Patient>();
   private conversations = new Map<Id, Conversation>();
   private appointments = new Map<Id, Appointment>();
+  private slotLocks = new Map<Id, SlotLock>();
   private interests = new Map<Id, PatientInterest>();
   private optOutWhatsappNumbers = new Set<string>();
   private webhookDeliveries = new Map<string, WebhookDeliveryRecord>();
   private outboundDeliveries = new Map<string, OutboundDeliveryRecord>();
   private appointmentCounter = 0;
+  private slotLockCounter = 0;
   private outboundDeliveryCounter = 0;
   private appointmentLocks = new Map<Id, Promise<unknown>>();
   private conversationLocks = new Map<Id, Promise<unknown>>();
@@ -68,6 +74,60 @@ export class InMemoryRepositories implements OperationalRepository {
   nextAppointmentId() {
     this.appointmentCounter += 1;
     return `appt_${this.appointmentCounter}`;
+  }
+
+  claimSlotLock(input: ClaimSlotLockInput) {
+    const conflict = [...this.slotLocks.values()].some(
+      (lock) =>
+        isActiveSlotLock(lock, input.now) &&
+        lock.clinicId === input.clinicId &&
+        lock.calendarId === input.calendarId &&
+        lock.conversationId !== input.conversationId &&
+        overlaps(lock, input)
+    );
+    if (conflict) {
+      return undefined;
+    }
+
+    this.slotLockCounter += 1;
+    const now = new Date(input.now);
+    const lock: SlotLock = {
+      id: `slotlock_${this.slotLockCounter}`,
+      clinicId: input.clinicId,
+      conversationId: input.conversationId,
+      serviceId: input.serviceId,
+      professionalId: input.professionalId,
+      calendarId: input.calendarId,
+      startsAt: new Date(input.startsAt),
+      endsAt: new Date(input.endsAt),
+      expiresAt: new Date(input.expiresAt),
+      status: "active",
+      createdAt: now,
+      updatedAt: now
+    };
+    this.slotLocks.set(lock.id, cloneSlotLock(lock));
+    return cloneSlotLock(lock);
+  }
+
+  listActiveSlotLocks(input: ListActiveSlotLocksInput) {
+    return [...this.slotLocks.values()]
+      .filter(
+        (lock) =>
+          isActiveSlotLock(lock, input.now) &&
+          lock.clinicId === input.clinicId &&
+          lock.conversationId !== input.excludeConversationId &&
+          overlaps(lock, { startsAt: input.from, endsAt: input.to })
+      )
+      .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
+      .map(cloneSlotLock);
+  }
+
+  releaseSlotLock(input: SlotLockMutationInput) {
+    this.updateSlotLockStatus(input.lockId, "released", input.now);
+  }
+
+  consumeSlotLock(input: SlotLockMutationInput) {
+    this.updateSlotLockStatus(input.lockId, "consumed", input.now);
   }
 
   async withAppointmentLock<T>(appointmentId: Id, operation: () => Promise<T>): Promise<T> {
@@ -284,6 +344,15 @@ export class InMemoryRepositories implements OperationalRepository {
     }
     return delivery;
   }
+
+  private updateSlotLockStatus(lockId: Id, status: SlotLock["status"], now: Date) {
+    const lock = this.slotLocks.get(lockId);
+    if (!lock || lock.status !== "active") {
+      return;
+    }
+
+    this.slotLocks.set(lockId, cloneSlotLock({ ...lock, status, updatedAt: new Date(now) }));
+  }
 }
 
 function conversationKey(input: { clinicId: Id; id: Id }) {
@@ -358,6 +427,9 @@ function cloneConversation(conversation: Conversation): Conversation {
       startsAt: new Date(conversation.pendingBooking.startsAt),
       endsAt: new Date(conversation.pendingBooking.endsAt)
     };
+    if (conversation.pendingBooking.slotLockExpiresAt) {
+      clone.pendingBooking.slotLockExpiresAt = new Date(conversation.pendingBooking.slotLockExpiresAt);
+    }
   }
   return clone;
 }
@@ -384,6 +456,25 @@ function clonePatientInterest(interest: PatientInterest): PatientInterest {
     preferredFrom: new Date(interest.preferredFrom),
     preferredTo: new Date(interest.preferredTo)
   };
+}
+
+function cloneSlotLock(lock: SlotLock): SlotLock {
+  return {
+    ...lock,
+    startsAt: new Date(lock.startsAt),
+    endsAt: new Date(lock.endsAt),
+    expiresAt: new Date(lock.expiresAt),
+    createdAt: new Date(lock.createdAt),
+    updatedAt: new Date(lock.updatedAt)
+  };
+}
+
+function isActiveSlotLock(lock: SlotLock, now: Date) {
+  return lock.status === "active" && lock.expiresAt.getTime() > now.getTime();
+}
+
+function overlaps(first: { startsAt: Date; endsAt: Date }, second: { startsAt: Date; endsAt: Date }) {
+  return first.startsAt.getTime() < second.endsAt.getTime() && first.endsAt.getTime() > second.startsAt.getTime();
 }
 
 function cloneWebhookDelivery(delivery: WebhookDeliveryRecord): WebhookDeliveryRecord {

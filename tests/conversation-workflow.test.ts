@@ -67,6 +67,77 @@ describe("ConversationWorkflow", () => {
     expect(result.text).not.toContain("DNI");
   });
 
+  it("does not offer an actively held pending slot to another conversation", async () => {
+    const { calendar, repos, workflow } = buildContext();
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") },
+      { startsAt: new Date("2026-06-01T13:30:00.000Z"), endsAt: new Date("2026-06-01T14:00:00.000Z") }
+    ]);
+
+    await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Quiero reservar botox"
+    });
+    const second = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_2",
+      patientId: "pat_2",
+      whatsappNumber: "+5491111112222",
+      text: "Quiero reservar botox"
+    });
+
+    expect(second.text).toContain("10:30");
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual(
+      expect.objectContaining({ startsAt: new Date("2026-06-01T13:00:00.000Z"), slotLockId: "slotlock_1" })
+    );
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_2" })?.pendingBooking).toEqual(
+      expect.objectContaining({ startsAt: new Date("2026-06-01T13:30:00.000Z"), slotLockId: "slotlock_2" })
+    );
+  });
+
+  it("releases a pending slot lock when the pending booking is cleared", async () => {
+    const { calendar, repos, workflow } = buildContext();
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
+    ]);
+
+    await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Quiero reservar botox"
+    });
+    expect(
+      await repos.listActiveSlotLocks({
+        clinicId: "clinic_1",
+        from: new Date("2026-06-01T13:00:00.000Z"),
+        to: new Date("2026-06-01T13:30:00.000Z"),
+        now: new Date("2026-05-29T12:00:00.000Z")
+      })
+    ).toHaveLength(1);
+
+    await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Quiero reservar limpieza facial"
+    });
+
+    expect(
+      await repos.listActiveSlotLocks({
+        clinicId: "clinic_1",
+        from: new Date("2026-06-01T13:00:00.000Z"),
+        to: new Date("2026-06-01T13:30:00.000Z"),
+        now: new Date("2026-05-29T12:00:00.000Z")
+      })
+    ).toEqual([]);
+  });
+
   it("can compose a more natural reply and stores the exchange in recent conversation memory", async () => {
     const responseComposer = new FakeResponseComposer(
       "Tengo un lugar el lunes 1 de junio a las 10:00 para Botox. Si te sirve, lo dejamos reservado."
@@ -114,12 +185,16 @@ describe("ConversationWorkflow", () => {
       text: "Quiero reservar botox"
     });
 
-    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual({
-      serviceId: "svc_botox",
-      professionalId: "pro_perez",
-      startsAt: new Date("2026-06-01T13:00:00.000Z"),
-      endsAt: new Date("2026-06-01T13:30:00.000Z")
-    });
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual(
+      expect.objectContaining({
+        serviceId: "svc_botox",
+        professionalId: "pro_perez",
+        startsAt: new Date("2026-06-01T13:00:00.000Z"),
+        endsAt: new Date("2026-06-01T13:30:00.000Z"),
+        slotLockId: expect.any(String),
+        slotLockExpiresAt: new Date("2026-05-29T12:10:00.000Z")
+      })
+    );
 
     const confirmResult = await workflow.handleInboundMessage({
       clinicId: "clinic_1",
@@ -148,6 +223,14 @@ describe("ConversationWorkflow", () => {
     expect(nameResult.text).toContain("10:00");
     expect(repos.getPatient("pat_1")?.fullName).toBe("Ana Gomez");
     expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toBeUndefined();
+    expect(
+      await repos.listActiveSlotLocks({
+        clinicId: "clinic_1",
+        from: new Date("2026-06-01T13:00:00.000Z"),
+        to: new Date("2026-06-01T13:30:00.000Z"),
+        now: new Date("2026-05-29T12:00:00.000Z")
+      })
+    ).toEqual([]);
     expect(repos.listAppointmentsByPatient("pat_1")).toEqual([
       expect.objectContaining({
         serviceId: "svc_botox",

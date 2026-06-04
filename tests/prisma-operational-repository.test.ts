@@ -317,6 +317,8 @@ describe("PrismaOperationalRepository core state", () => {
       patientId: "pat_1",
       botPaused: true,
       pendingBooking: {
+        slotLockId: "slotlock_pending",
+        slotLockExpiresAt: new Date("2026-05-29T12:10:00.000Z"),
         serviceId: "svc_botox",
         professionalId: "pro_perez",
         startsAt: new Date("2026-06-01T13:00:00.000Z"),
@@ -338,6 +340,8 @@ describe("PrismaOperationalRepository core state", () => {
         patientId: "pat_1",
         botPaused: true,
         pendingBooking: {
+          slotLockId: "slotlock_pending",
+          slotLockExpiresAt: new Date("2026-05-29T12:10:00.000Z"),
           serviceId: "svc_botox",
           professionalId: "pro_perez",
           startsAt: new Date("2026-06-01T13:00:00.000Z"),
@@ -517,6 +521,81 @@ describe("PrismaOperationalRepository core state", () => {
     expect(await repos.listActiveInterests()).toEqual([
       expect.objectContaining({ id: "interest_1", professionalId: "pro_perez", status: "active" })
     ]);
+  });
+
+  it("claims, lists, releases, and consumes slot locks", async () => {
+    const lock = await repos.claimSlotLock({
+      clinicId: "clinic_1",
+      conversationId: "conv_lock_1",
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      calendarId: "cal_perez",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      endsAt: new Date("2026-06-01T13:30:00.000Z"),
+      expiresAt: new Date("2026-06-01T13:10:00.000Z"),
+      now: new Date("2026-06-01T13:00:00.000Z")
+    });
+
+    expect(lock).toEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^slotlock_[0-9a-f-]{36}$/u),
+        clinicId: "clinic_1",
+        conversationId: "conv_lock_1",
+        status: "active"
+      })
+    );
+    await expect(
+      repos.claimSlotLock({
+        clinicId: "clinic_1",
+        conversationId: "conv_lock_2",
+        serviceId: "svc_botox",
+        professionalId: "pro_perez",
+        calendarId: "cal_perez",
+        startsAt: new Date("2026-06-01T13:00:00.000Z"),
+        endsAt: new Date("2026-06-01T13:30:00.000Z"),
+        expiresAt: new Date("2026-06-01T13:10:00.000Z"),
+        now: new Date("2026-06-01T13:00:00.000Z")
+      })
+    ).resolves.toBeUndefined();
+    await expect(
+      repos.listActiveSlotLocks({
+        clinicId: "clinic_1",
+        from: new Date("2026-06-01T13:00:00.000Z"),
+        to: new Date("2026-06-01T13:30:00.000Z"),
+        now: new Date("2026-06-01T13:00:00.000Z")
+      })
+    ).resolves.toEqual([expect.objectContaining({ id: lock?.id, status: "active" })]);
+
+    await repos.releaseSlotLock({ lockId: lock!.id, now: new Date("2026-06-01T13:01:00.000Z") });
+    await expect(
+      repos.listActiveSlotLocks({
+        clinicId: "clinic_1",
+        from: new Date("2026-06-01T13:00:00.000Z"),
+        to: new Date("2026-06-01T13:30:00.000Z"),
+        now: new Date("2026-06-01T13:01:00.000Z")
+      })
+    ).resolves.toEqual([]);
+
+    const nextLock = await repos.claimSlotLock({
+      clinicId: "clinic_1",
+      conversationId: "conv_lock_1",
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      calendarId: "cal_perez",
+      startsAt: new Date("2026-06-01T14:00:00.000Z"),
+      endsAt: new Date("2026-06-01T14:30:00.000Z"),
+      expiresAt: new Date("2026-06-01T14:10:00.000Z"),
+      now: new Date("2026-06-01T14:00:00.000Z")
+    });
+    await repos.consumeSlotLock({ lockId: nextLock!.id, now: new Date("2026-06-01T14:01:00.000Z") });
+    await expect(
+      repos.listActiveSlotLocks({
+        clinicId: "clinic_1",
+        from: new Date("2026-06-01T14:00:00.000Z"),
+        to: new Date("2026-06-01T14:30:00.000Z"),
+        now: new Date("2026-06-01T14:01:00.000Z")
+      })
+    ).resolves.toEqual([]);
   });
 
   it("serializes appointment lock operations in process", async () => {

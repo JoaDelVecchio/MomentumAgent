@@ -1,6 +1,6 @@
 import type { Appointment, ClinicProfile } from "../../domain/types.js";
 import type { AuditLogPort } from "../../ports/audit-log.js";
-import { CalendarInfrastructureError } from "../../ports/calendar.js";
+import { CalendarInfrastructureError, type CalendarSlot } from "../../ports/calendar.js";
 import type { Conversation, ConversationMessage, OperationalRepository, PendingBooking } from "../../ports/repositories.js";
 import type { SchedulingService } from "../scheduling/scheduling-service.js";
 import { decideAgentAction, hasMedicalSafetyLanguage, type AgentDecision } from "./agent-router.js";
@@ -19,6 +19,7 @@ import { detectNormalizedTimePreference, filterSlotsByDaypart, resolveSlotSearch
 
 const SIDE_EFFECT_CONFIDENCE_THRESHOLD = 0.7;
 const MAX_RECENT_MESSAGES = 12;
+const PENDING_SLOT_LOCK_MINUTES = 10;
 
 type InboundMessage = {
   clinicId: string;
@@ -26,6 +27,13 @@ type InboundMessage = {
   patientId: string;
   whatsappNumber: string;
   text: string;
+};
+
+type LockedSlotClaim = {
+  slot: CalendarSlot;
+  professional: ClinicProfile["professionals"][number];
+  lockId: string;
+  lockExpiresAt: Date;
 };
 
 export type WorkflowResult =
@@ -475,7 +483,8 @@ export class ConversationWorkflow {
         serviceId: service.id,
         professionalId: preferredProfessional?.id ?? pending.professionalId,
         from: range.from,
-        to: range.to
+        to: range.to,
+        conversationId: input.conversationId
       }),
       intent,
       profile.timezone
@@ -488,23 +497,33 @@ export class ConversationWorkflow {
       };
     }
 
-    const first = slots[0];
-    const professional = profile.professionals.find((candidate) => candidate.calendarId === first.calendarId);
-    if (!professional) {
-      return { kind: "reply", text: `No pude identificar el profesional disponible para ${service.name}.` };
+    const lockedSlot = await this.claimFirstAvailableSlot({
+      clinicId: input.clinicId,
+      conversationId: input.conversationId,
+      profile,
+      service,
+      slots
+    });
+    if (!lockedSlot) {
+      return {
+        kind: "reply",
+        text: `No encontre otro horario disponible para ${service.name} con esa preferencia. Te puedo mantener el horario ofrecido.`
+      };
     }
 
     await this.setPendingBooking(input.clinicId, input.conversationId, {
       ...(pending.appointmentId ? { appointmentId: pending.appointmentId } : {}),
+      slotLockId: lockedSlot.lockId,
+      slotLockExpiresAt: lockedSlot.lockExpiresAt,
       serviceId: service.id,
-      professionalId: professional.id,
-      startsAt: first.startsAt,
-      endsAt: first.endsAt
+      professionalId: lockedSlot.professional.id,
+      startsAt: lockedSlot.slot.startsAt,
+      endsAt: lockedSlot.slot.endsAt
     });
 
     return {
       kind: "reply",
-      text: `Tengo este horario: ${this.formatDateForPatient(first.startsAt, profile)} para ${service.name}. Si te sirve, lo confirmamos.`
+      text: `Tengo este horario: ${this.formatDateForPatient(lockedSlot.slot.startsAt, profile)} para ${service.name}. Si te sirve, lo confirmamos.`
     };
   }
 
@@ -539,7 +558,8 @@ export class ConversationWorkflow {
         serviceId: service.id,
         professionalId: preferredProfessional?.id,
         from: range.from,
-        to: range.to
+        to: range.to,
+        conversationId: input.conversationId
       }),
       intent,
       profile.timezone
@@ -554,27 +574,34 @@ export class ConversationWorkflow {
       };
     }
 
-    const first = slots[0];
-    const professional = profile.professionals.find((candidate) => candidate.calendarId === first.calendarId);
-    if (!professional) {
+    const lockedSlot = await this.claimFirstAvailableSlot({
+      clinicId: input.clinicId,
+      conversationId: input.conversationId,
+      profile,
+      service,
+      slots
+    });
+    if (!lockedSlot) {
       await this.clearPendingBooking(input.clinicId, input.conversationId);
       return {
         kind: "reply",
-        text: `No pude identificar el profesional disponible para ${service.name}. Te derivo con recepcion.`
+        text: `No encontre horarios disponibles para ${service.name} con esa preferencia. Podes decirme otro dia u horario.`
       };
     }
 
     await this.setPendingBooking(input.clinicId, input.conversationId, {
+      slotLockId: lockedSlot.lockId,
+      slotLockExpiresAt: lockedSlot.lockExpiresAt,
       serviceId: service.id,
-      professionalId: professional.id,
-      startsAt: first.startsAt,
-      endsAt: first.endsAt
+      professionalId: lockedSlot.professional.id,
+      startsAt: lockedSlot.slot.startsAt,
+      endsAt: lockedSlot.slot.endsAt
     });
 
     const faqPrefix = buildBookingFaqPrefix(profile, intent);
     return {
       kind: "reply",
-      text: `${faqPrefix}Tengo este horario: ${this.formatDateForPatient(first.startsAt, profile)} para ${service.name}. Si te sirve, lo confirmamos.`
+      text: `${faqPrefix}Tengo este horario: ${this.formatDateForPatient(lockedSlot.slot.startsAt, profile)} para ${service.name}. Si te sirve, lo confirmamos.`
     };
   }
 
@@ -605,7 +632,8 @@ export class ConversationWorkflow {
             clinicId: input.clinicId,
             appointmentId: pending.appointmentId,
             startsAt: pending.startsAt,
-            conversationId: input.conversationId
+            conversationId: input.conversationId,
+            slotLockId: pending.slotLockId
           })
         : await this.scheduling.bookAppointment({
             clinicId: input.clinicId,
@@ -613,7 +641,8 @@ export class ConversationWorkflow {
             serviceId: pending.serviceId,
             startsAt: pending.startsAt,
             professionalId: pending.professionalId,
-            conversationId: input.conversationId
+            conversationId: input.conversationId,
+            slotLockId: pending.slotLockId
           });
       await this.clearPendingBooking(input.clinicId, input.conversationId);
 
@@ -638,6 +667,7 @@ export class ConversationWorkflow {
   private async setPendingBooking(clinicId: string, conversationId: string, pendingBooking: PendingBooking) {
     const conversation = await this.repos.getConversation({ clinicId, conversationId });
     if (conversation) {
+      await this.releaseReplacedSlotLock(conversation.pendingBooking, pendingBooking);
       await this.repos.saveConversation({ ...conversation, pendingBooking, updatedAt: this.now() });
     }
   }
@@ -645,6 +675,7 @@ export class ConversationWorkflow {
   private async clearPendingBooking(clinicId: string, conversationId: string) {
     const conversation = await this.repos.getConversation({ clinicId, conversationId });
     if (conversation) {
+      await this.releasePendingSlotLock(conversation.pendingBooking);
       const { pendingBooking: _pendingBooking, ...nextConversation } = conversation;
       await this.repos.saveConversation({ ...nextConversation, updatedAt: this.now() });
     }
@@ -771,25 +802,85 @@ export class ConversationWorkflow {
       serviceId: service.id,
       professionalId: appointment.professionalId,
       from: searchFrom,
-      to: addDays(searchFrom, 14)
+      to: addDays(searchFrom, 14),
+      conversationId: input.conversationId
     });
     const nextSlot = slots.find((slot) => slot.startsAt.getTime() !== appointment.startsAt.getTime());
     if (!nextSlot) {
       return { kind: "reply", text: "No encontre otro horario disponible para reprogramar. Te aviso si se libera uno." };
     }
 
+    const lockedSlot = await this.claimFirstAvailableSlot({
+      clinicId: input.clinicId,
+      conversationId: input.conversationId,
+      profile,
+      service,
+      slots: slots.filter((slot) => slot.startsAt.getTime() !== appointment.startsAt.getTime())
+    });
+    if (!lockedSlot) {
+      return { kind: "reply", text: "No encontre otro horario disponible para reprogramar. Te aviso si se libera uno." };
+    }
+
     await this.setPendingBooking(input.clinicId, input.conversationId, {
       appointmentId: appointment.id,
+      slotLockId: lockedSlot.lockId,
+      slotLockExpiresAt: lockedSlot.lockExpiresAt,
       serviceId: appointment.serviceId,
       professionalId: appointment.professionalId,
-      startsAt: nextSlot.startsAt,
-      endsAt: nextSlot.endsAt
+      startsAt: lockedSlot.slot.startsAt,
+      endsAt: lockedSlot.slot.endsAt
     });
 
     return {
       kind: "reply",
-      text: `Tengo este nuevo horario: ${this.formatDateForPatient(nextSlot.startsAt, profile)}. Si te sirve, lo confirmamos.`
+      text: `Tengo este nuevo horario: ${this.formatDateForPatient(lockedSlot.slot.startsAt, profile)}. Si te sirve, lo confirmamos.`
     };
+  }
+
+  private async claimFirstAvailableSlot(input: {
+    clinicId: string;
+    conversationId: string;
+    profile: ClinicProfile;
+    service: ClinicProfile["services"][number];
+    slots: CalendarSlot[];
+  }): Promise<LockedSlotClaim | undefined> {
+    for (const slot of input.slots) {
+      const professional = input.profile.professionals.find((candidate) => candidate.calendarId === slot.calendarId);
+      if (!professional) {
+        continue;
+      }
+
+      const now = this.now();
+      const expiresAt = addMinutes(now, PENDING_SLOT_LOCK_MINUTES);
+      const lock = await this.repos.claimSlotLock({
+        clinicId: input.clinicId,
+        conversationId: input.conversationId,
+        serviceId: input.service.id,
+        professionalId: professional.id,
+        calendarId: professional.calendarId,
+        startsAt: slot.startsAt,
+        endsAt: slot.endsAt,
+        expiresAt,
+        now
+      });
+      if (lock) {
+        return { slot, professional, lockId: lock.id, lockExpiresAt: lock.expiresAt };
+      }
+    }
+
+    return undefined;
+  }
+
+  private async releaseReplacedSlotLock(previous: PendingBooking | undefined, next: PendingBooking) {
+    if (previous?.slotLockId && previous.slotLockId !== next.slotLockId) {
+      await this.releasePendingSlotLock(previous);
+    }
+  }
+
+  private async releasePendingSlotLock(pendingBooking: PendingBooking | undefined) {
+    if (pendingBooking?.slotLockId) {
+      await this.repos.releaseSlotLock({ lockId: pendingBooking.slotLockId, now: this.now() });
+    }
   }
 
   private async findSingleScheduledAppointment(input: InboundMessage): Promise<Appointment | undefined> {
@@ -907,6 +998,10 @@ function startOfDay(date: Date) {
 
 function addDays(date: Date, days: number) {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function addMinutes(date: Date, minutes: number) {
+  return new Date(date.getTime() + minutes * 60 * 1000);
 }
 
 function trimRecentMessages(messages: ConversationMessage[]) {

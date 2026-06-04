@@ -8,6 +8,8 @@ import type {
   ConversationByPatientLookup,
   ConversationLookup,
   ConversationMessage,
+  ClaimSlotLockInput,
+  ListActiveSlotLocksInput,
   ListScheduledAppointmentsInput,
   OutboundAutomationType,
   OperationalRepository,
@@ -18,6 +20,9 @@ import type {
   PatientInterest,
   PendingBooking,
   ProcessedWebhookDeliveryInput,
+  SlotLock,
+  SlotLockMutationInput,
+  SlotLockStatus,
   WebhookDeliveryClaim,
   WebhookDeliveryOutcomeInput,
   WebhookDeliveryRecord
@@ -70,6 +75,21 @@ type AppointmentRecord = {
   startsAt: Date;
   endsAt: Date;
   status: string;
+};
+
+type SlotLockRecord = {
+  id: string;
+  clinicId: string;
+  conversationId: string;
+  serviceId: string;
+  professionalId: string;
+  calendarId: string;
+  startsAt: Date;
+  endsAt: Date;
+  expiresAt: Date;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 type ConversationRecord = {
@@ -314,6 +334,67 @@ export class PrismaOperationalRepository implements OperationalRepository {
 
   async nextAppointmentId(): Promise<Id> {
     return `appt_${randomUUID()}`;
+  }
+
+  async claimSlotLock(input: ClaimSlotLockInput): Promise<SlotLock | undefined> {
+    return this.prisma.$transaction(async (tx) => {
+      const conflict = await tx.slotLock.findFirst({
+        where: {
+          clinicId: input.clinicId,
+          calendarId: input.calendarId,
+          status: "active",
+          expiresAt: { gt: input.now },
+          conversationId: { not: input.conversationId },
+          startsAt: { lt: input.endsAt },
+          endsAt: { gt: input.startsAt }
+        },
+        select: { id: true }
+      });
+      if (conflict) {
+        return undefined;
+      }
+
+      const lock = await tx.slotLock.create({
+        data: {
+          id: `slotlock_${randomUUID()}`,
+          clinicId: input.clinicId,
+          conversationId: input.conversationId,
+          serviceId: input.serviceId,
+          professionalId: input.professionalId,
+          calendarId: input.calendarId,
+          startsAt: input.startsAt,
+          endsAt: input.endsAt,
+          expiresAt: input.expiresAt,
+          status: "active",
+          createdAt: input.now,
+          updatedAt: input.now
+        }
+      });
+      return toSlotLock(lock);
+    });
+  }
+
+  async listActiveSlotLocks(input: ListActiveSlotLocksInput): Promise<SlotLock[]> {
+    const locks = await this.prisma.slotLock.findMany({
+      where: {
+        clinicId: input.clinicId,
+        status: "active",
+        expiresAt: { gt: input.now },
+        startsAt: { lt: input.to },
+        endsAt: { gt: input.from },
+        ...(input.excludeConversationId ? { NOT: { conversationId: input.excludeConversationId } } : {})
+      },
+      orderBy: { startsAt: "asc" }
+    });
+    return locks.map(toSlotLock);
+  }
+
+  async releaseSlotLock(input: SlotLockMutationInput): Promise<void> {
+    await this.updateActiveSlotLockStatus(input, "released");
+  }
+
+  async consumeSlotLock(input: SlotLockMutationInput): Promise<void> {
+    await this.updateActiveSlotLockStatus(input, "consumed");
   }
 
   async withAppointmentLock<T>(appointmentId: Id, operation: () => Promise<T>): Promise<T> {
@@ -676,6 +757,13 @@ export class PrismaOperationalRepository implements OperationalRepository {
     }
     throw new Error(`Outbound delivery ${key} is already ${toOutboundDeliveryStatus(delivery.status)}`);
   }
+
+  private async updateActiveSlotLockStatus(input: SlotLockMutationInput, status: SlotLockStatus): Promise<void> {
+    await this.prisma.slotLock.updateMany({
+      where: { id: input.lockId, status: "active" },
+      data: { status, updatedAt: input.now }
+    });
+  }
 }
 
 async function syncServiceProfessionalLinks(tx: Prisma.TransactionClient, profile: ClinicProfile): Promise<void> {
@@ -757,17 +845,20 @@ function serializePendingBooking(pendingBooking: PendingBooking | undefined): st
   return JSON.stringify({
     ...pendingBooking,
     startsAt: pendingBooking.startsAt.toISOString(),
-    endsAt: pendingBooking.endsAt.toISOString()
+    endsAt: pendingBooking.endsAt.toISOString(),
+    slotLockExpiresAt: pendingBooking.slotLockExpiresAt?.toISOString()
   });
 }
 
 function parsePendingBooking(json: string | null): PendingBooking | undefined {
   if (!json) return undefined;
   const pendingBooking = JSON.parse(json) as PendingBookingJson;
+  const { slotLockExpiresAt, ...rest } = pendingBooking;
   return {
-    ...pendingBooking,
+    ...rest,
     startsAt: new Date(pendingBooking.startsAt),
-    endsAt: new Date(pendingBooking.endsAt)
+    endsAt: new Date(pendingBooking.endsAt),
+    ...(slotLockExpiresAt ? { slotLockExpiresAt: new Date(slotLockExpiresAt) } : {})
   };
 }
 
@@ -837,6 +928,9 @@ function cloneConversation(conversation: Conversation): Conversation {
       startsAt: new Date(conversation.pendingBooking.startsAt),
       endsAt: new Date(conversation.pendingBooking.endsAt)
     };
+    if (conversation.pendingBooking.slotLockExpiresAt) {
+      clone.pendingBooking.slotLockExpiresAt = new Date(conversation.pendingBooking.slotLockExpiresAt);
+    }
   }
   return clone;
 }
@@ -917,6 +1011,23 @@ function toAppointment(record: AppointmentRecord): Appointment {
     startsAt: record.startsAt,
     endsAt: record.endsAt,
     status: toAppointmentStatus(record.status)
+  };
+}
+
+function toSlotLock(record: SlotLockRecord): SlotLock {
+  return {
+    id: record.id,
+    clinicId: record.clinicId,
+    conversationId: record.conversationId,
+    serviceId: record.serviceId,
+    professionalId: record.professionalId,
+    calendarId: record.calendarId,
+    startsAt: record.startsAt,
+    endsAt: record.endsAt,
+    expiresAt: record.expiresAt,
+    status: toSlotLockStatus(record.status),
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt
   };
 }
 
@@ -1014,6 +1125,11 @@ function toOutboundDeliveryStatus(value: string): OutboundDeliveryStatus {
   throw new Error(`Unknown outbound delivery status: ${value}`);
 }
 
+function toSlotLockStatus(value: string): SlotLockStatus {
+  if (value === "active" || value === "released" || value === "consumed") return value;
+  throw new Error(`Unknown slot lock status: ${value}`);
+}
+
 function parseOutboundMetadata(metadataJson: string): Record<string, string> {
   const metadata = JSON.parse(metadataJson) as unknown;
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
@@ -1085,9 +1201,10 @@ async function withKeyedLock<T>(
   }
 }
 
-type PendingBookingJson = Omit<PendingBooking, "startsAt" | "endsAt"> & {
+type PendingBookingJson = Omit<PendingBooking, "startsAt" | "endsAt" | "slotLockExpiresAt"> & {
   startsAt: string;
   endsAt: string;
+  slotLockExpiresAt?: string;
 };
 
 type ConversationMessageJson = Omit<ConversationMessage, "at"> & {

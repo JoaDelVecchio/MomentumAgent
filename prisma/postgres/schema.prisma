@@ -44,6 +44,7 @@ model Clinic {
   processedWebhookDeliveries ProcessedWebhookDelivery[]
   outboundDeliveries        OutboundDelivery[]
   knowledgeRecords          ClinicKnowledge[]
+  slotLocks                 SlotLock[]
   convertedLeads            ClinicLead[]          @relation("ConvertedClinic")
 
   @@index([lifecycleState, paymentStatus, updatedAt])
@@ -176,6 +177,26 @@ model Appointment {
   @@index([patientId, status])
   @@index([serviceId])
   @@index([professionalId, startsAt])
+}
+
+model SlotLock {
+  id             String   @id
+  clinicId       String
+  conversationId String
+  serviceId      String
+  professionalId String
+  calendarId     String
+  startsAt       DateTime
+  endsAt         DateTime
+  expiresAt      DateTime
+  status         String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  clinic         Clinic   @relation(fields: [clinicId], references: [id])
+
+  @@index([clinicId, status, expiresAt])
+  @@index([clinicId, calendarId, startsAt, endsAt])
+  @@index([conversationId])
 }
 
 model Conversation {

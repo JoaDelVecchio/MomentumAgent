@@ -8,10 +8,13 @@ import { parseClinicProfile } from "../src/domain/clinic-profile.js";
 import type {
   ConversationByPatientLookup,
   ConversationLookup,
+  ClaimSlotLockInput,
+  ListActiveSlotLocksInput,
   ListScheduledAppointmentsInput,
   OperationalRepository,
   OutboundDeliveryClaimInput,
   ProcessedWebhookDeliveryInput,
+  SlotLockMutationInput,
   WebhookDeliveryOutcomeInput
 } from "../src/ports/repositories.js";
 
@@ -64,6 +67,77 @@ describe("OperationalRepository port", () => {
     );
     expect(repos.conversationLockCalls).toEqual(["clinic_1:conv_async"]);
   });
+
+  it("supports async slot lock operations", async () => {
+    const repos = new AsyncRepositoryAdapter(new InMemoryRepositories());
+    await repos.upsertClinicProfile(
+      parseClinicProfile({
+        clinicId: "clinic_1",
+        name: "Clinica Demo",
+        timezone: "America/Argentina/Buenos_Aires",
+        services: [
+          {
+            id: "svc_botox",
+            name: "Botox",
+            durationMinutes: 30,
+            priceText: "Desde $120.000",
+            preparation: "Evitar alcohol 24 horas antes.",
+            restrictions: [],
+            professionalIds: ["pro_perez"]
+          }
+        ],
+        professionals: [{ id: "pro_perez", name: "Dra. Perez", calendarId: "cal_perez" }],
+        appointmentRules: { minimumNoticeMinutes: 0, cancellationNoticeMinutes: 0, bufferMinutes: 0 },
+        requiredPatientFields: ["fullName"]
+      })
+    );
+
+    const lock = await repos.claimSlotLock({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      serviceId: "svc_botox",
+      professionalId: "pro_perez",
+      calendarId: "cal_perez",
+      startsAt: new Date("2026-06-01T13:00:00.000Z"),
+      endsAt: new Date("2026-06-01T13:30:00.000Z"),
+      expiresAt: new Date("2026-06-01T13:10:00.000Z"),
+      now: new Date("2026-06-01T13:00:00.000Z")
+    });
+
+    expect(lock).toEqual(expect.objectContaining({ id: expect.any(String), status: "active" }));
+    await expect(
+      repos.claimSlotLock({
+        clinicId: "clinic_1",
+        conversationId: "conv_2",
+        serviceId: "svc_botox",
+        professionalId: "pro_perez",
+        calendarId: "cal_perez",
+        startsAt: new Date("2026-06-01T13:00:00.000Z"),
+        endsAt: new Date("2026-06-01T13:30:00.000Z"),
+        expiresAt: new Date("2026-06-01T13:10:00.000Z"),
+        now: new Date("2026-06-01T13:00:00.000Z")
+      })
+    ).resolves.toBeUndefined();
+
+    expect(
+      await repos.listActiveSlotLocks({
+        clinicId: "clinic_1",
+        from: new Date("2026-06-01T13:00:00.000Z"),
+        to: new Date("2026-06-01T13:30:00.000Z"),
+        now: new Date("2026-06-01T13:00:00.000Z")
+      })
+    ).toHaveLength(1);
+
+    await repos.releaseSlotLock({ lockId: lock!.id, now: new Date("2026-06-01T13:01:00.000Z") });
+    expect(
+      await repos.listActiveSlotLocks({
+        clinicId: "clinic_1",
+        from: new Date("2026-06-01T13:00:00.000Z"),
+        to: new Date("2026-06-01T13:30:00.000Z"),
+        now: new Date("2026-06-01T13:01:00.000Z")
+      })
+    ).toEqual([]);
+  });
 });
 
 class AsyncRepositoryAdapter implements OperationalRepository {
@@ -101,6 +175,22 @@ class AsyncRepositoryAdapter implements OperationalRepository {
 
   async nextAppointmentId() {
     return this.inner.nextAppointmentId();
+  }
+
+  async claimSlotLock(input: ClaimSlotLockInput) {
+    return this.inner.claimSlotLock(input);
+  }
+
+  async listActiveSlotLocks(input: ListActiveSlotLocksInput) {
+    return this.inner.listActiveSlotLocks(input);
+  }
+
+  async releaseSlotLock(input: SlotLockMutationInput) {
+    return this.inner.releaseSlotLock(input);
+  }
+
+  async consumeSlotLock(input: SlotLockMutationInput) {
+    return this.inner.consumeSlotLock(input);
   }
 
   async withAppointmentLock<T>(appointmentId: string, operation: () => Promise<T>) {
