@@ -49,7 +49,8 @@ describe("test mode chat page source", () => {
   it("exposes a chat transcript and new conversation action", () => {
     expect(testModePage).toMatch(/New conversation/);
     expect(testModePage).toMatch(/test-chat-thread/);
-    expect(testModePage).toMatch(/Dry-run: reads calendar availability but does not create events\./);
+    expect(testModePage).toMatch(/Test mode uses live availability and keeps the calendar unchanged\./);
+    expect(testModePage).not.toMatch(/Dry-run/);
     expect(globals).toMatch(/\.test-chat-thread/);
     expect(globals).toMatch(/\.test-chat-message/);
   });

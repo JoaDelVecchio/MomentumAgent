@@ -3,6 +3,7 @@ import { buildNonTransactionalReply, isPendingSlotRefinementIntent } from "./age
 import type { ConversationState } from "./agent-state.js";
 import type { ConversationUnderstanding } from "./interpreter.js";
 import { normalizeText } from "./intent.js";
+import { extractLikelyPatientFullName } from "./patient-data.js";
 
 const SIDE_EFFECT_CONFIDENCE_THRESHOLD = 0.7;
 
@@ -59,6 +60,10 @@ export function decideAgentAction(input: {
 
   if (state.hasPendingBooking && understanding.intent === "question" && hasRequestedFaqTopic(understanding)) {
     return decision(state, "answer_pending_faq", "Question should be answered against the pending booking context.");
+  }
+
+  if (state.hasPendingBooking && understanding.intent === "question" && hasPendingBookingFaqLanguage(messageText)) {
+    return decision(state, "answer_pending_faq", "Pending booking question should be answered before collecting data.");
   }
 
   if (state.hasPendingBooking && canCompletePendingPatientData(messageText, understanding)) {
@@ -158,7 +163,7 @@ function canCompletePendingPatientData(text: string, intent: ConversationUnderst
     return intent.confidence >= SIDE_EFFECT_CONFIDENCE_THRESHOLD && looksLikeFullName(intent.patientFullName ?? "");
   }
 
-  return intent.intent === "question" && looksLikeFullName(text);
+  return intent.intent === "question" && Boolean(extractLikelyPatientFullName(text));
 }
 
 function hasOperationalActionLanguage(text: string) {
@@ -178,4 +183,27 @@ function hasOperationalActionLanguage(text: string) {
 function looksLikeFullName(text: string) {
   const normalized = text.replace(/[^\p{L}\s'-]/gu, " ").replace(/\s+/g, " ").trim();
   return normalized.length >= 5 && normalized.split(" ").length >= 2;
+}
+
+function hasPendingBookingFaqLanguage(text: string) {
+  const normalized = normalizeText(text);
+  return (
+    normalized.includes("quien") ||
+    normalized.includes("cuanto") ||
+    normalized.includes("como") ||
+    normalized.includes("cual") ||
+    normalized.includes("doctor") ||
+    normalized.includes("doctora") ||
+    normalized.includes("profesional") ||
+    normalized.includes("medico") ||
+    normalized.includes("precio") ||
+    normalized.includes("sale") ||
+    normalized.includes("vale") ||
+    normalized.includes("cuesta") ||
+    normalized.includes("prepar") ||
+    normalized.includes("antes") ||
+    normalized.includes("dura") ||
+    normalized.includes("duracion") ||
+    normalized.includes("restric")
+  );
 }

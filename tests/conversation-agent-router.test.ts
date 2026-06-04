@@ -114,6 +114,15 @@ describe("decideAgentAction", () => {
 
     expect(
       decideAgentAction({
+        messageText: "quien seria eldoctor?",
+        state: pendingState,
+        understanding: understanding({ intent: "question", requestedTopics: [] }),
+        clinicProfile: profile
+      }).action
+    ).toBe("answer_pending_faq");
+
+    expect(
+      decideAgentAction({
         messageText: "Mi nombre es Ana Gomez",
         state: pendingState,
         understanding: understanding({ intent: "unknown", patientFullName: "Ana Gomez" }),

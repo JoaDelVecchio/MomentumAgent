@@ -23,7 +23,23 @@ For this clinic assistant, "full IA" should not mean the model can create appoin
 - `ConversationWorkflow` passes recent conversation memory to the interpreter.
 - `ConversationWorkflow` persists the last conversation turns in `Conversation.recentMessagesJson`.
 - `OpenAIConversationResponseComposer` rewrites safe draft replies in Argentine Spanish.
+- Pending booking questions are answered before patient-data collection, so interruptions like price, preparation, or professional questions do not accidentally confirm a booking.
+- Test Mode uses the production conversation path with simulated confirmation and no user-facing internal-mode copy.
 - `AI_INTERPRETER_FALLBACK=rules` is the default. If OpenAI times out, returns invalid structured output, or is unavailable, booking/cancel/reschedule intent falls back to deterministic rules instead of a generic clarification.
+
+## Comparison to strong assistants
+
+- OpenAI-style agents: use conversation state, structured outputs, tool separation, guardrails, and handoffs. Momentum matches this with structured interpretation, deterministic scheduling, medical safety handoff, and response composition.
+- Rasa CALM-style assistants: separate language understanding from business-process control and allow conversation repairs. Momentum now does this for pending booking interruptions: answer the question, preserve the offered slot, and resume confirmation.
+- Botpress-style autonomous workflows: let the LLM decide high-level actions, but keep variables and workflow transitions inspectable. Momentum keeps auditable `intent.detected` and `agent.decision` events.
+- Intercom Fin-style support bots: answer from approved knowledge, avoid loops, and hand off when confidence or data is insufficient. Momentum answers only from configured clinic profile fields and uses safe fallback/handoff instead of inventing facts.
+
+## Operating principles
+
+- Prefer "answer then continue" over forcing the patient back into a rigid flow.
+- Never treat a question as required patient data.
+- Never expose internal test-mode mechanics to the patient-facing transcript.
+- Preserve pending booking state through smalltalk, FAQs, and professional questions.
 
 ## Runtime knobs
 

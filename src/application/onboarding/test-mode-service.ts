@@ -66,7 +66,7 @@ export class OnboardingTestModeService {
       options.audit,
       this.now,
       options.interpreter ?? new RulesConversationInterpreter(),
-      { bookingMode: "dry-run", responseComposer: options.responseComposer }
+      { bookingMode: "simulate", responseComposer: options.responseComposer }
     );
   }
 
@@ -114,7 +114,7 @@ export class OnboardingTestModeService {
 function isPositiveBookingTestReply(result: WorkflowResult): boolean {
   return (
     result.kind === "reply" &&
-    (result.text.includes("Tengo este horario") || result.text.includes("Dry-run: el turno se podria confirmar"))
+    (result.text.includes("Tengo este horario") || result.text.includes("Turno confirmado"))
   );
 }
 

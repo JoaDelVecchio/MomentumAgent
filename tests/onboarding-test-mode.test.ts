@@ -118,15 +118,15 @@ describe("OnboardingTestModeService", () => {
     ).rejects.toMatchObject({ code: "unsafe_test_identity" });
   });
 
-  it("dry-runs confirmation paths without saving appointments or calendar events", async () => {
+  it("simulates confirmation paths without exposing test-mode internals or saving appointments", async () => {
     const context = await buildContext();
     context.calendar.seedAvailability("cal_perez", [
       { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
     ]);
     const input = {
       clinicId: "clinic_setup",
-      conversationId: "test:clinic_setup:dry-run",
-      patientId: "test_patient:clinic_setup:dry-run",
+      conversationId: "test:clinic_setup:simulate",
+      patientId: "test_patient:clinic_setup:simulate",
       whatsappNumber: "+5490000000000"
     };
 
@@ -139,19 +139,20 @@ describe("OnboardingTestModeService", () => {
     const result = await context.testModeService.runMessage({ ...input, text: "Ana Gomez" });
 
     expect(result.kind).toBe("reply");
-    expect(result.text).toContain("Dry-run: el turno se podria confirmar");
+    expect(result.text).toContain("Turno confirmado");
     expect(result.text).toContain("10:00");
-    expect(result.text).toContain("No se creo ningun evento real.");
+    expect(result.text).not.toContain("Dry-run");
+    expect(result.text).not.toContain("No se creo ningun evento real.");
     await expect(context.onboarding.getClinicSetup("clinic_setup")).resolves.toEqual(
       expect.objectContaining({ testConversationPassed: true })
     );
-    expect(context.operational.listAppointmentsByPatient("test_patient:clinic_setup:dry-run")).toEqual([]);
+    expect(context.operational.listAppointmentsByPatient("test_patient:clinic_setup:simulate")).toEqual([]);
     await expect(context.calendar.getEvent("evt_1", "cal_perez")).resolves.toBeUndefined();
     expect(context.operational.getPatient("prod_patient")).toBeUndefined();
     expect(context.operational.listConversationsByClinic("clinic_setup")).toEqual([
       expect.objectContaining({
-        id: "test:clinic_setup:dry-run",
-        patientId: "test_patient:clinic_setup:dry-run"
+        id: "test:clinic_setup:simulate",
+        patientId: "test_patient:clinic_setup:simulate"
       })
     ]);
   });

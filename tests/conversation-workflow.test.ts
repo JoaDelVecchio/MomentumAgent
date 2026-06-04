@@ -192,6 +192,72 @@ describe("ConversationWorkflow", () => {
     expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
   });
 
+  it("answers the offered professional during a pending booking without treating the question as a name", async () => {
+    const { calendar, repos, workflow } = buildContext();
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") }
+    ]);
+
+    await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "Quiero reservar botox"
+    });
+    const pendingBooking = repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking;
+
+    const result = await workflow.handleInboundMessage({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111",
+      text: "quien seria eldoctor?"
+    });
+
+    expect(result).toEqual({
+      kind: "reply",
+      text: "Seria con Dra. Perez."
+    });
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual(
+      pendingBooking
+    );
+    expect(repos.getPatient("pat_1")?.fullName).toBeUndefined();
+    expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
+  });
+
+  it("keeps the pending booking coherent through the clinic_1 transcript flow", async () => {
+    const { calendar, repos, workflow } = buildContext();
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-01T13:00:00.000Z"), endsAt: new Date("2026-06-01T13:30:00.000Z") },
+      { startsAt: new Date("2026-06-01T13:30:00.000Z"), endsAt: new Date("2026-06-01T14:00:00.000Z") }
+    ]);
+    const base = {
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      whatsappNumber: "+5491111111111"
+    };
+
+    await workflow.handleInboundMessage({ ...base, text: "Hola, quiero reservar botox." });
+    await workflow.handleInboundMessage({ ...base, text: "como te llamas" });
+    await workflow.handleInboundMessage({ ...base, text: "que servicios tenes?" });
+    await workflow.handleInboundMessage({ ...base, text: "tenes turno?" });
+    const preparation = await workflow.handleInboundMessage({ ...base, text: "necesito prepararme de alguna forma?" });
+    const professional = await workflow.handleInboundMessage({ ...base, text: "quien seria eldoctor?" });
+    const price = await workflow.handleInboundMessage({ ...base, text: "cuanto sale?" });
+
+    expect(preparation.text).toContain("Evitar alcohol 24 horas antes.");
+    expect(professional).toEqual({ kind: "reply", text: "Seria con Dra. Perez." });
+    expect(price.text).toContain("Desde $120.000");
+    expect(price.text).not.toContain("Dry-run");
+    expect(repos.getPatient("pat_1")?.fullName).toBeUndefined();
+    expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual(
+      expect.objectContaining({ serviceId: "svc_botox", professionalId: "pro_perez" })
+    );
+  });
+
   it("answers natural service FAQ questions without asking the patient to restate the treatment", async () => {
     const { workflow } = buildContext();
 

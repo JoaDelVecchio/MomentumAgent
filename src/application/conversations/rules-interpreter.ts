@@ -169,6 +169,21 @@ function detectRequestedTopics(text: string): RequestedTopic[] {
   if (containsAny(normalized, ["obra social", "prepaga", "seguro"])) {
     topics.push("insurance");
   }
+  if (
+    containsAny(normalized, [
+      "doctor",
+      "doctora",
+      "dr ",
+      "dra ",
+      "medico",
+      "profesional",
+      "quien seria",
+      "quien atiende",
+      "con quien"
+    ])
+  ) {
+    topics.push("professional");
+  }
 
   return topics;
 }

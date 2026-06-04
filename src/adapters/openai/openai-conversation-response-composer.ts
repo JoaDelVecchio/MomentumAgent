@@ -58,6 +58,7 @@ function buildInstructions() {
     "Do not invent availability. Calendar availability is already decided by application code.",
     "Do not diagnose, recommend treatment for a personal medical case, or decide medical eligibility.",
     "If the draft says a human receptionist will continue, keep that meaning.",
+    "Do not add emojis unless the patient used emojis first.",
     "Keep replies concise for WhatsApp: one short paragraph, or two short sentences when clearer.",
     "Return only the requested structured JSON."
   ].join("\n");

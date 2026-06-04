@@ -2,12 +2,21 @@ import { describe, expect, it } from "vitest";
 import { isPassingTestModeResult } from "../apps/web/src/lib/test-mode-readiness.js";
 
 describe("test mode readiness display", () => {
-  it("passes only for the same booking-ready reply text used by the backend", () => {
+  it("passes for booking-ready and simulated confirmation replies used by the backend", () => {
     expect(
       isPassingTestModeResult({
         result: {
           kind: "reply",
           text: "Tengo este horario: 2026-06-01T13:00:00.000Z"
+        }
+      })
+    ).toBe(true);
+
+    expect(
+      isPassingTestModeResult({
+        result: {
+          kind: "reply",
+          text: "Turno confirmado para lunes 1 de junio a las 10:00."
         }
       })
     ).toBe(true);

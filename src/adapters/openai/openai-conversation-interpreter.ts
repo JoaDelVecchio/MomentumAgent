@@ -112,6 +112,7 @@ function buildInstructions() {
     "Set serviceName only to a service present in clinicProfile. Infer it from aliases and natural wording such as 'me quiero hacer botox', 'toxina', or 'info de botox'.",
     "For mixed question plus availability messages such as 'cuanto sale botox y tenes algo a la tarde', use intent book, serviceName Botox, requestedTopics price, and the time preference.",
     "For service questions without a booking request, use intent question and include the matching serviceName plus requestedTopics when possible.",
+    "For questions about doctor, professional, clinician, 'quien me atiende', or 'quien seria', use requestedTopics professional.",
     "For broad service information requests about a configured treatment, use intent question with that serviceName even if requestedTopics is empty.",
     "Classify role questions like 'como te llamas' or 'quien sos' as smalltalk, not confirm.",
     "Classify service catalog questions like 'que servicios ofrecen', 'que servicios tenes', or 'que tratamientos tienen' as services_catalog.",

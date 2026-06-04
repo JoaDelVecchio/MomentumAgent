@@ -171,6 +171,32 @@ describe("RulesConversationInterpreter", () => {
     );
   });
 
+  it("detects professional questions with typos during pending bookings", async () => {
+    const result = await new RulesConversationInterpreter().interpret({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      messageText: "quien seria eldoctor?",
+      now: new Date("2026-06-03T12:00:00.000Z"),
+      clinicProfile: profile,
+      pendingBooking: {
+        serviceId: "svc_botox",
+        professionalId: "pro_perez",
+        startsAt: new Date("2026-06-04T12:00:00.000Z"),
+        endsAt: new Date("2026-06-04T12:30:00.000Z")
+      }
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: "rules",
+        intent: "question",
+        requestedTopics: ["professional"],
+        requiresHuman: false
+      })
+    );
+  });
+
   it("treats natural service and availability phrasing as booking intent", async () => {
     const result = await new RulesConversationInterpreter().interpret({
       clinicId: "clinic_1",

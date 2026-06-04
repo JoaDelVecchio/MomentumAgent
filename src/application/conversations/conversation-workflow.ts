@@ -6,8 +6,9 @@ import type { SchedulingService } from "../scheduling/scheduling-service.js";
 import { decideAgentAction, hasMedicalSafetyLanguage, type AgentDecision } from "./agent-router.js";
 import { buildConversationState, type ConversationState } from "./agent-state.js";
 import { buildFaqResponse, hasRequestedFaqTopic, missingConfiguredFaqResponse } from "./faq-response.js";
-import type { ConversationInterpreter, ConversationUnderstanding } from "./interpreter.js";
+import type { ConversationInterpreter, ConversationUnderstanding, RequestedTopic } from "./interpreter.js";
 import { normalizeText } from "./intent.js";
+import { extractLikelyPatientFullName, normalizeFullNameIfComplete } from "./patient-data.js";
 import type { ConversationResponseComposer } from "./response-composer.js";
 import { formatPatientDateTime } from "./response-formatting.js";
 import { RulesConversationInterpreter } from "./rules-interpreter.js";
@@ -30,7 +31,7 @@ export type WorkflowResult =
   | { kind: "handoff"; text: string };
 
 export type ConversationWorkflowOptions = {
-  bookingMode?: "execute" | "dry-run";
+  bookingMode?: "execute" | "simulate";
   responseComposer?: ConversationResponseComposer;
 };
 
@@ -421,11 +422,11 @@ export class ConversationWorkflow {
       return { kind: "reply", text: "Perfecto. Para confirmar el turno, pasame nombre y apellido." };
     }
 
-    if (this.options.bookingMode === "dry-run") {
+    if (this.options.bookingMode === "simulate") {
       await this.clearPendingBooking(input.clinicId, input.conversationId);
       return {
         kind: "reply",
-        text: `Dry-run: el turno se podria confirmar para ${await this.formatDateForClinic(input.clinicId, pending.startsAt)}. No se creo ningun evento real.`
+        text: `Turno confirmado para ${await this.formatDateForClinic(input.clinicId, pending.startsAt)}. Te vamos a enviar el recordatorio antes del turno.`
       };
     }
 
@@ -485,15 +486,30 @@ export class ConversationWorkflow {
     conversation: Conversation,
     intent: ConversationUnderstanding
   ): Promise<WorkflowResult | undefined> {
-    if (!conversation.pendingBooking || intent.intent !== "question" || !hasRequestedFaqTopic(intent)) {
+    if (!conversation.pendingBooking || intent.intent !== "question") {
       return undefined;
     }
 
+    const enrichedIntent = inferPendingQuestionTopics(input.text, intent);
+    if (!hasRequestedFaqTopic(enrichedIntent)) {
+      return undefined;
+    }
     const profile = await this.repos.getClinicProfile(input.clinicId);
     const service = profile?.services.find((candidate) => candidate.id === conversation.pendingBooking?.serviceId);
+    const professional = profile?.professionals.find(
+      (candidate) => candidate.id === conversation.pendingBooking?.professionalId
+    );
+    if (enrichedIntent.requestedTopics.includes("professional")) {
+      return {
+        kind: "reply",
+        text: professional
+          ? `Seria con ${professional.name}.`
+          : "No pude identificar el profesional del horario ofrecido. Te derivo con recepcion si queres confirmarlo."
+      };
+    }
     const response = buildFaqResponse(profile, {
-      ...intent,
-      serviceName: intent.serviceName ?? service?.name
+      ...enrichedIntent,
+      serviceName: enrichedIntent.serviceName ?? service?.name
     });
 
     return {
@@ -625,8 +641,7 @@ export class ConversationWorkflow {
 }
 
 function looksLikeFullName(text: string) {
-  const normalized = normalizeFullName(text);
-  return normalized ? normalized.split(" ").length >= 2 : false;
+  return Boolean(normalizeFullNameIfComplete(text));
 }
 
 function extractPendingPatientFullName(text: string, intent: ConversationUnderstanding) {
@@ -646,7 +661,7 @@ function extractPendingPatientFullName(text: string, intent: ConversationUnderst
   }
 
   if (intent.intent === "question") {
-    return normalizeFullNameIfComplete(text);
+    return extractLikelyPatientFullName(text);
   }
 
   return undefined;
@@ -684,14 +699,37 @@ function hasOperationalActionLanguage(text: string) {
   );
 }
 
-function normalizeFullName(text: string) {
-  const normalized = text.replace(/[^\p{L}\s'-]/gu, " ").replace(/\s+/g, " ").trim();
-  return normalized.length >= 5 ? normalized : undefined;
+function inferPendingQuestionTopics(text: string, intent: ConversationUnderstanding): ConversationUnderstanding {
+  const normalized = normalizeText(text);
+  const inferredTopics = new Set<RequestedTopic>(intent.requestedTopics);
+
+  if (
+    normalized.includes("doctor") ||
+    normalized.includes("doctora") ||
+    normalized.includes("medico") ||
+    normalized.includes("profesional") ||
+    normalized.includes("quien")
+  ) {
+    inferredTopics.add("professional");
+  }
+  if (containsAny(normalized, ["precio", "sale", "vale", "cuesta", "costo", "valor", "cuanto"])) {
+    inferredTopics.add("price");
+  }
+  if (containsAny(normalized, ["prepar", "antes", "cuidados previos"])) {
+    inferredTopics.add("preparation");
+  }
+  if (containsAny(normalized, ["dura", "duracion", "tiempo tarda", "cuanto tarda"])) {
+    inferredTopics.add("duration");
+  }
+  if (containsAny(normalized, ["restric", "contraindic"])) {
+    inferredTopics.add("restrictions");
+  }
+
+  return { ...intent, requestedTopics: [...inferredTopics] };
 }
 
-function normalizeFullNameIfComplete(text: string) {
-  const normalized = normalizeFullName(text);
-  return normalized && normalized.split(" ").length >= 2 ? normalized : undefined;
+function containsAny(text: string, candidates: string[]) {
+  return candidates.some((candidate) => text.includes(candidate));
 }
 
 function startOfDay(date: Date) {

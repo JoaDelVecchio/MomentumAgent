@@ -60,6 +60,7 @@ describe("OpenAIConversationResponseComposer", () => {
 
     expect(result).toBe("Tengo un lugar el miercoles 3 de junio a las 13:00 para Botox. Si te sirve, lo confirmamos.");
     expect(client.lastBody?.instructions).toContain("Preserve the exact operational meaning");
+    expect(client.lastBody?.instructions).toContain("Do not add emojis");
     expect(client.lastBody?.reasoning).toEqual({ effort: "medium" });
     expect(JSON.parse(client.lastBody?.input ?? "{}").recentMessages).toHaveLength(1);
     expect(JSON.stringify(client.lastBody)).not.toContain("cal_perez");

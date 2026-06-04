@@ -27,7 +27,7 @@ export function buildFaqResponse(
   }
 
   if (understanding.requestedTopics.length === 0) {
-    const parts = buildServiceFactParts(service, ["price", "duration", "preparation", "restrictions"]);
+    const parts = buildServiceFactParts(profile, service, ["price", "duration", "preparation", "restrictions"]);
     if (parts.length === 0) {
       return undefined;
     }
@@ -38,7 +38,7 @@ export function buildFaqResponse(
     return undefined;
   }
 
-  const parts = buildServiceFactParts(service, understanding.requestedTopics);
+  const parts = buildServiceFactParts(profile, service, understanding.requestedTopics);
   if (parts.length === 0) {
     return undefined;
   }
@@ -62,11 +62,14 @@ function hasAllRequestedServiceFacts(service: Service, topics: RequestedTopic[])
   if (requested.has("restrictions") && service.restrictions.length === 0) {
     return false;
   }
+  if (requested.has("professional") && service.professionalIds.length === 0) {
+    return false;
+  }
 
   return true;
 }
 
-function buildServiceFactParts(service: Service, topics: RequestedTopic[]) {
+function buildServiceFactParts(profile: ClinicProfile, service: Service, topics: RequestedTopic[]) {
   const requested = new Set(topics);
   const parts: string[] = [];
 
@@ -81,6 +84,14 @@ function buildServiceFactParts(service: Service, topics: RequestedTopic[]) {
   }
   if (requested.has("restrictions") && service.restrictions.length > 0) {
     parts.push(`restricciones: ${service.restrictions.join(" ")}`);
+  }
+  if (requested.has("professional")) {
+    const professionalNames = service.professionalIds
+      .map((professionalId) => profile.professionals.find((professional) => professional.id === professionalId)?.name)
+      .filter((name): name is string => Boolean(name));
+    if (professionalNames.length > 0) {
+      parts.push(`profesionales: ${professionalNames.join(", ")}.`);
+    }
   }
 
   return parts;

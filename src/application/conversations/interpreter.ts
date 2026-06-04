@@ -10,6 +10,7 @@ export const requestedTopicSchema = z.enum([
   "restrictions",
   "payment",
   "insurance",
+  "professional",
   "other"
 ]);
 

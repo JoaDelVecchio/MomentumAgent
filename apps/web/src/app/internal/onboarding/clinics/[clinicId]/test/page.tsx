@@ -24,7 +24,7 @@ export default function ClinicTestModePage() {
   const [message, setMessage] = useState(defaultMessage);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [response, setResponse] = useState<TestMessageResponse | null>(null);
-  const [status, setStatus] = useState("Enter an admin token and send a dry-run message.");
+  const [status, setStatus] = useState("Enter an admin token and send a test message.");
   const [isRunning, setIsRunning] = useState(false);
   const [threadPaused, setThreadPaused] = useState(false);
 
@@ -72,7 +72,7 @@ export default function ClinicTestModePage() {
     setResponse(null);
     setThreadPaused(false);
     setMessage(defaultMessage);
-    setStatus("New dry-run conversation ready.");
+    setStatus("New test conversation ready.");
   }
 
   return (
@@ -104,7 +104,7 @@ export default function ClinicTestModePage() {
             New conversation
           </button>
         </div>
-        <p className="test-chat-meta">Dry-run: reads calendar availability but does not create events.</p>
+        <p className="test-chat-meta">Test mode uses live availability and keeps the calendar unchanged.</p>
         <div className="test-chat-thread" aria-live="polite">
           {messages.length > 0 ? (
             messages.map((chatMessage) => (
