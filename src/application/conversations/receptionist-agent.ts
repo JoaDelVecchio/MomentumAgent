@@ -23,6 +23,14 @@ export const receptionistTurnSchema = z.object({
   serviceName: z.string().min(1).nullable().optional(),
   professionalPreference: z.string().min(1).nullable().optional(),
   timePreference: z.string().min(1).nullable().optional(),
+  normalizedTimePreference: z
+    .object({
+      from: z.coerce.date().optional(),
+      to: z.coerce.date().optional(),
+      daypart: z.enum(["morning", "afternoon", "evening"]).optional()
+    })
+    .nullable()
+    .optional(),
   requestedTopics: z.array(requestedTopicSchema).default([]),
   patientFullName: z.string().min(1).nullable().optional(),
   needsHuman: z.boolean(),

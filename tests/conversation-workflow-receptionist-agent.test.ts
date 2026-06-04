@@ -11,11 +11,11 @@ import type {
 import { SchedulingService } from "../src/application/scheduling/scheduling-service.js";
 import { parseClinicProfile } from "../src/domain/clinic-profile.js";
 
-function buildContext(turns: ReceptionistTurn[]) {
+function buildContext(turns: ReceptionistTurn[], options: { now?: () => Date } = {}) {
   const repos = new InMemoryRepositories();
   const calendar = new FakeCalendar();
   const audit = new InMemoryAuditLog();
-  const now = () => new Date("2026-06-01T12:00:00.000Z");
+  const now = options.now ?? (() => new Date("2026-06-01T12:00:00.000Z"));
   const receptionistAgent = new SequenceReceptionistAgent(turns);
 
   repos.upsertClinicProfile(
@@ -148,6 +148,94 @@ describe("ConversationWorkflow receptionist agent path", () => {
 
     expect(result.text).toContain("nombre y apellido");
     expect(repos.listAppointmentsByPatient("pat_1")).toEqual([]);
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual(
+      expect.objectContaining({ serviceId: "svc_botox" })
+    );
+  });
+
+  it("honors a receptionist weekday preference instead of offering the first unrelated day", async () => {
+    const { calendar, repos, workflow } = buildContext([
+      turn({
+        proposedAction: "search_slots",
+        serviceName: "Botox",
+        timePreference: "martes",
+        normalizedTimePreference: {
+          from: new Date("2026-06-04T00:00:00.000Z"),
+          to: new Date("2026-06-05T00:00:00.000Z")
+        },
+        replyDraft: "Busco un turno para el martes."
+      })
+    ], {
+      now: () => new Date("2026-06-04T12:00:00.000Z")
+    });
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-04T12:00:00.000Z"), endsAt: new Date("2026-06-04T12:30:00.000Z") },
+      { startsAt: new Date("2026-06-09T02:30:00.000Z"), endsAt: new Date("2026-06-09T03:00:00.000Z") },
+      { startsAt: new Date("2026-06-09T12:00:00.000Z"), endsAt: new Date("2026-06-09T12:30:00.000Z") }
+    ]);
+
+    const result = await workflow.handleInboundMessage({ ...baseInput, text: "quiero turno para el martes" });
+
+    expect(result.text).toContain("martes 9 de junio");
+    expect(result.text).not.toContain("jueves 4 de junio");
+    expect(result.text).not.toContain("lunes 8 de junio");
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual(
+      expect.objectContaining({
+        serviceId: "svc_botox",
+        startsAt: new Date("2026-06-09T12:00:00.000Z")
+      })
+    );
+  });
+
+  it("does not offer another day when the requested weekday has no slots", async () => {
+    const { calendar, repos, workflow } = buildContext([
+      turn({
+        proposedAction: "search_slots",
+        serviceName: "Botox",
+        timePreference: "martes"
+      })
+    ], {
+      now: () => new Date("2026-06-04T12:00:00.000Z")
+    });
+    calendar.seedAvailability("cal_perez", [
+      { startsAt: new Date("2026-06-04T12:00:00.000Z"), endsAt: new Date("2026-06-04T12:30:00.000Z") }
+    ]);
+
+    const result = await workflow.handleInboundMessage({ ...baseInput, text: "quiero turno para el martes" });
+
+    expect(result.text).toContain("No encontre horarios disponibles para Botox con esa preferencia");
+    expect(result.text).not.toContain("jueves 4 de junio");
+    expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toBeUndefined();
+  });
+
+  it("answers configured business facts instead of trusting an invented receptionist draft", async () => {
+    const { repos, workflow } = buildContext([
+      turn({
+        proposedAction: "answer_business_question",
+        serviceName: "Botox",
+        requestedTopics: ["price"],
+        replyDraft: "Botox sale $999.000."
+      })
+    ]);
+    repos.saveConversation({
+      id: "conv_1",
+      clinicId: "clinic_1",
+      patientId: "pat_1",
+      botPaused: false,
+      pendingBooking: {
+        serviceId: "svc_botox",
+        professionalId: "pro_perez",
+        startsAt: new Date("2026-06-04T12:00:00.000Z"),
+        endsAt: new Date("2026-06-04T12:30:00.000Z")
+      },
+      createdAt: new Date("2026-06-01T12:00:00.000Z"),
+      updatedAt: new Date("2026-06-01T12:00:00.000Z")
+    });
+
+    const result = await workflow.handleInboundMessage({ ...baseInput, text: "cuanto sale?" });
+
+    expect(result.text).toContain("Desde $120.000");
+    expect(result.text).not.toContain("$999.000");
     expect(repos.getConversation({ clinicId: "clinic_1", conversationId: "conv_1" })?.pendingBooking).toEqual(
       expect.objectContaining({ serviceId: "svc_botox" })
     );

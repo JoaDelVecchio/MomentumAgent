@@ -130,8 +130,8 @@ describe("FallbackConversationInterpreter", () => {
         serviceName: "Botox"
       })
     );
-    expect(result.normalizedTimePreference?.from).toEqual(new Date("2026-06-02T00:00:00.000Z"));
-    expect(result.normalizedTimePreference?.to).toEqual(new Date("2026-06-03T00:00:00.000Z"));
+    expect(result.normalizedTimePreference?.from).toEqual(new Date("2026-06-02T03:00:00.000Z"));
+    expect(result.normalizedTimePreference?.to).toEqual(new Date("2026-06-03T03:00:00.000Z"));
     expect(result.reason).toContain("Primary provider fallback: OpenAI timed out.");
   });
 });

@@ -24,6 +24,10 @@ export function decideReceptionistAction(input: {
     return decision(state, turn.proposedAction, "handoff", "Human handoff or medical safety matched.");
   }
 
+  if (hasAbusiveOrIrrelevantLanguage(messageText) && isSideEffectAction(turn.proposedAction)) {
+    return decision(state, turn.proposedAction, "reply_only", "Abusive or irrelevant text cannot trigger side effects.");
+  }
+
   if (isLowConfidenceSideEffect(turn)) {
     return decision(state, turn.proposedAction, "reply_only", "Low-confidence side effect was downgraded.");
   }

@@ -142,8 +142,8 @@ export const momentumAgentTranscriptCases: MomentumAgentTranscriptCase[] = [
           intent: "slot_refinement",
           timePreference: "manana a la tarde",
           normalizedTimePreference: {
-            from: new Date("2026-06-04T00:00:00.000Z"),
-            to: new Date("2026-06-05T00:00:00.000Z"),
+            from: new Date("2026-06-04T03:00:00.000Z"),
+            to: new Date("2026-06-05T03:00:00.000Z"),
             daypart: "afternoon"
           }
         },

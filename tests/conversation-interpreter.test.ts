@@ -142,8 +142,8 @@ describe("RulesConversationInterpreter", () => {
         serviceName: null,
         requiresHuman: false,
         normalizedTimePreference: expect.objectContaining({
-          from: new Date("2026-06-07T00:00:00.000Z"),
-          to: new Date("2026-06-08T00:00:00.000Z")
+          from: new Date("2026-06-07T03:00:00.000Z"),
+          to: new Date("2026-06-08T03:00:00.000Z")
         })
       })
     );
@@ -214,11 +214,35 @@ describe("RulesConversationInterpreter", () => {
         serviceName: "Botox",
         timePreference: "Hola, me quiero hacer botox manana a la tarde",
         normalizedTimePreference: expect.objectContaining({
-          from: new Date("2026-06-04T00:00:00.000Z"),
-          to: new Date("2026-06-05T00:00:00.000Z"),
+          from: new Date("2026-06-04T03:00:00.000Z"),
+          to: new Date("2026-06-05T03:00:00.000Z"),
           daypart: "afternoon"
         }),
         requiresHuman: false
+      })
+    );
+  });
+
+  it("normalizes weekday booking requests in the clinic timezone", async () => {
+    const result = await new RulesConversationInterpreter().interpret({
+      clinicId: "clinic_1",
+      conversationId: "conv_1",
+      patientId: "pat_1",
+      messageText: "quiero turno de botox para el martes a la tarde",
+      now: new Date("2026-06-04T12:00:00.000Z"),
+      clinicProfile: profile
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: "rules",
+        intent: "book",
+        serviceName: "Botox",
+        normalizedTimePreference: expect.objectContaining({
+          from: new Date("2026-06-09T03:00:00.000Z"),
+          to: new Date("2026-06-10T03:00:00.000Z"),
+          daypart: "afternoon"
+        })
       })
     );
   });

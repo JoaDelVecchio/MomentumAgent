@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ConversationUnderstanding } from "../src/application/conversations/interpreter.js";
-import { filterSlotsByDaypart, resolveSlotSearchRange } from "../src/application/conversations/time-preferences.js";
+import {
+  detectNormalizedTimePreference,
+  filterSlotsByDaypart,
+  resolveSlotSearchRange
+} from "../src/application/conversations/time-preferences.js";
 
 function understanding(input: Partial<ConversationUnderstanding>): ConversationUnderstanding {
   return {
@@ -70,6 +74,70 @@ describe("resolveSlotSearchRange", () => {
     });
 
     expect(range).toEqual({ from: defaultFrom, to: defaultTo });
+  });
+});
+
+describe("detectNormalizedTimePreference", () => {
+  it("normalizes weekday requests to the next matching local day", () => {
+    expect(detectNormalizedTimePreference("quiero turno para el martes", new Date("2026-06-04T12:00:00.000Z"))).toEqual({
+      from: new Date("2026-06-09T00:00:00.000Z"),
+      to: new Date("2026-06-10T00:00:00.000Z")
+    });
+  });
+
+  it("uses the clinic timezone for local day boundaries", () => {
+    expect(
+      detectNormalizedTimePreference(
+        "quiero turno para el martes",
+        new Date("2026-06-04T12:00:00.000Z"),
+        "America/Argentina/Buenos_Aires"
+      )
+    ).toEqual({
+      from: new Date("2026-06-09T03:00:00.000Z"),
+      to: new Date("2026-06-10T03:00:00.000Z")
+    });
+  });
+
+  it("keeps daypart when normalizing weekday requests", () => {
+    expect(
+      detectNormalizedTimePreference(
+        "martes a la tarde",
+        new Date("2026-06-04T12:00:00.000Z"),
+        "America/Argentina/Buenos_Aires"
+      )
+    ).toEqual({
+      from: new Date("2026-06-09T03:00:00.000Z"),
+      to: new Date("2026-06-10T03:00:00.000Z"),
+      daypart: "afternoon"
+    });
+  });
+
+  it("distinguishes tomorrow morning from a generic morning daypart", () => {
+    expect(
+      detectNormalizedTimePreference(
+        "manana a la manana",
+        new Date("2026-06-04T12:00:00.000Z"),
+        "America/Argentina/Buenos_Aires"
+      )
+    ).toEqual({
+      from: new Date("2026-06-05T03:00:00.000Z"),
+      to: new Date("2026-06-06T03:00:00.000Z"),
+      daypart: "morning"
+    });
+  });
+
+  it("normalizes today in the clinic timezone", () => {
+    expect(
+      detectNormalizedTimePreference(
+        "tenes algo hoy a la tarde",
+        new Date("2026-06-04T12:00:00.000Z"),
+        "America/Argentina/Buenos_Aires"
+      )
+    ).toEqual({
+      from: new Date("2026-06-04T03:00:00.000Z"),
+      to: new Date("2026-06-05T03:00:00.000Z"),
+      daypart: "afternoon"
+    });
   });
 });
 

@@ -6,6 +6,7 @@ import type {
 } from "./interpreter.js";
 import { interpretIntent, normalizeText } from "./intent.js";
 import { findMentionedService, findProfessional } from "./service-matching.js";
+import { detectNormalizedTimePreference as detectSharedNormalizedTimePreference } from "./time-preferences.js";
 
 export class RulesConversationInterpreter implements ConversationInterpreter {
   async interpret(input: ConversationInterpreterInput): Promise<ConversationUnderstanding> {
@@ -18,7 +19,11 @@ export class RulesConversationInterpreter implements ConversationInterpreter {
       ? findProfessional(input.clinicProfile, input.messageText)
       : undefined;
     const requestedTopics = detectRequestedTopics(input.messageText);
-    const normalizedTimePreference = detectNormalizedTimePreference(normalized, input.now);
+    const normalizedTimePreference = detectSharedNormalizedTimePreference(
+      normalized,
+      input.now,
+      input.clinicProfile?.timezone
+    );
 
     if (intent.type === "handoff") {
       return {
@@ -232,135 +237,4 @@ function questionConfidence(
     return 0.65;
   }
   return 0.45;
-}
-
-function detectNormalizedTimePreference(normalized: string, now: Date) {
-  const dateRange = detectDateRange(normalized, now);
-  const daypart = detectDaypart(normalized);
-  if (!dateRange && !daypart) {
-    return null;
-  }
-
-  return {
-    ...(dateRange ?? {}),
-    ...(daypart ? { daypart } : {})
-  };
-}
-
-function detectDaypart(normalized: string): "morning" | "afternoon" | "evening" | undefined {
-  if (containsAny(normalized, ["tarde", "mediodia"])) {
-    return "afternoon";
-  }
-  if (containsAny(normalized, ["noche", "ultima hora"])) {
-    return "evening";
-  }
-  if (containsAny(normalized, ["a la manana", "por la manana", "temprano"])) {
-    return "morning";
-  }
-  return undefined;
-}
-
-function detectDateRange(normalized: string, now: Date) {
-  if (normalized.includes("pasado manana")) {
-    return buildRelativeDayRange(now, 2);
-  }
-
-  if (normalized.includes("manana") && !containsAny(normalized, ["a la manana", "por la manana"])) {
-    return buildRelativeDayRange(now, 1);
-  }
-
-  const explicitMonth = normalized.match(
-    /\b(\d{1,2}) de (enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/
-  );
-  if (explicitMonth) {
-    return buildDayRange({
-      day: Number(explicitMonth[1]),
-      month: monthNumber(explicitMonth[2]),
-      year: now.getUTCFullYear(),
-      now,
-      rollPastDate: true
-    });
-  }
-
-  const numeric = normalized.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
-  if (numeric) {
-    const parsedYear = numeric[3] ? Number(numeric[3]) : now.getUTCFullYear();
-    return buildDayRange({
-      day: Number(numeric[1]),
-      month: Number(numeric[2]) - 1,
-      year: parsedYear < 100 ? 2000 + parsedYear : parsedYear,
-      now,
-      rollPastDate: !numeric[3]
-    });
-  }
-
-  const dayOnly = normalized.match(/\b(?:el|dia|para) (\d{1,2})\b/);
-  if (dayOnly) {
-    return buildDayRange({
-      day: Number(dayOnly[1]),
-      month: now.getUTCMonth(),
-      year: now.getUTCFullYear(),
-      now,
-      rollPastDate: true,
-      rollByMonth: true
-    });
-  }
-
-  return undefined;
-}
-
-function buildRelativeDayRange(now: Date, daysFromNow: number) {
-  const from = addDays(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())), daysFromNow);
-  return { from, to: addDays(from, 1) };
-}
-
-function buildDayRange(input: {
-  day: number;
-  month: number;
-  year: number;
-  now: Date;
-  rollPastDate: boolean;
-  rollByMonth?: boolean;
-}) {
-  if (input.day < 1 || input.day > 31 || input.month < 0 || input.month > 11) {
-    return undefined;
-  }
-
-  let from = new Date(Date.UTC(input.year, input.month, input.day));
-  if (
-    input.rollPastDate &&
-    from < new Date(Date.UTC(input.now.getUTCFullYear(), input.now.getUTCMonth(), input.now.getUTCDate()))
-  ) {
-    from = input.rollByMonth
-      ? new Date(Date.UTC(input.year, input.month + 1, input.day))
-      : new Date(Date.UTC(input.year + 1, input.month, input.day));
-  }
-  if (from.getUTCDate() !== input.day) {
-    return undefined;
-  }
-
-  return { from, to: new Date(from.getTime() + 24 * 60 * 60 * 1000) };
-}
-
-function addDays(date: Date, days: number) {
-  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
-}
-
-function monthNumber(month: string) {
-  const months: Record<string, number> = {
-    enero: 0,
-    febrero: 1,
-    marzo: 2,
-    abril: 3,
-    mayo: 4,
-    junio: 5,
-    julio: 6,
-    agosto: 7,
-    septiembre: 8,
-    setiembre: 8,
-    octubre: 9,
-    noviembre: 10,
-    diciembre: 11
-  };
-  return months[month] ?? -1;
 }

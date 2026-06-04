@@ -74,6 +74,21 @@ describe("decideReceptionistAction", () => {
     );
   });
 
+  it("does not allow any calendar side effect from abusive text", () => {
+    expect(
+      decideReceptionistAction({
+        messageText: "quiero reservar botox pelotudo",
+        state: idleState,
+        turn: turn({ proposedAction: "search_slots", serviceName: "Botox", confidence: 0.96 })
+      })
+    ).toEqual(
+      expect.objectContaining({
+        proposedAction: "search_slots",
+        action: "reply_only"
+      })
+    );
+  });
+
   it("does not confirm without a pending booking", () => {
     expect(
       decideReceptionistAction({

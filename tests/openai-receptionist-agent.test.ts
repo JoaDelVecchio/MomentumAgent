@@ -31,6 +31,7 @@ describe("OpenAIReceptionistAgent", () => {
       serviceName: "Botox",
       professionalPreference: null,
       timePreference: null,
+      normalizedTimePreference: { from: "2026-06-09T00:00:00.000Z", to: "2026-06-10T00:00:00.000Z", daypart: null },
       requestedTopics: ["price"],
       patientFullName: null,
       needsHuman: false,
@@ -77,6 +78,10 @@ describe("OpenAIReceptionistAgent", () => {
       expect.objectContaining({
         proposedAction: "answer_business_question",
         serviceName: "Botox",
+        normalizedTimePreference: {
+          from: new Date("2026-06-09T00:00:00.000Z"),
+          to: new Date("2026-06-10T00:00:00.000Z")
+        },
         requestedTopics: ["price"]
       })
     );

@@ -479,7 +479,7 @@ describe("ConversationWorkflow", () => {
 
     expect(result).toEqual({
       kind: "reply",
-      text: "No encontre horarios disponibles para Botox esta semana. Te aviso si se libera un turno o podes decirme otro dia."
+      text: "No encontre horarios disponibles para Botox con esa preferencia. Podes decirme otro dia u horario."
     });
   });
 

@@ -15,7 +15,7 @@ import type { ConversationResponseComposer } from "./response-composer.js";
 import { formatPatientDateTime } from "./response-formatting.js";
 import { RulesConversationInterpreter } from "./rules-interpreter.js";
 import { findProfessional, findService, formatServiceList } from "./service-matching.js";
-import { filterSlotsByDaypart, resolveSlotSearchRange } from "./time-preferences.js";
+import { detectNormalizedTimePreference, filterSlotsByDaypart, resolveSlotSearchRange } from "./time-preferences.js";
 
 const SIDE_EFFECT_CONFIDENCE_THRESHOLD = 0.7;
 const MAX_RECENT_MESSAGES = 12;
@@ -289,14 +289,23 @@ export class ConversationWorkflow {
               : buildReceptionistPolicyFallback(input.conversationState)
         };
       case "answer_business_question":
-        return { kind: "reply", text: safeReceptionistReplyText(input.turn, input.conversationState) };
+        return await this.answerReceptionistBusinessQuestion(input);
       case "search_slots":
-        return await this.handleBookingIntent(input.input, receptionistUnderstanding(input.turn, "book"));
+        return await this.handleBookingIntent(
+          input.input,
+          receptionistUnderstanding(input.turn, "book", input.input.text, this.now(), input.clinicProfile?.timezone)
+        );
       case "refine_pending_slot":
         return await this.handlePendingSlotRefinement(
           input.input,
           input.conversation,
-          receptionistUnderstanding(input.turn, "slot_refinement"),
+          receptionistUnderstanding(
+            input.turn,
+            "slot_refinement",
+            input.input.text,
+            this.now(),
+            input.clinicProfile?.timezone
+          ),
           input.clinicProfile
         );
       case "confirm_pending_booking":
@@ -305,7 +314,7 @@ export class ConversationWorkflow {
         const dataResult = await this.tryCompletePendingPatientData(
           input.input,
           input.conversation,
-          receptionistUnderstanding(input.turn, "unknown")
+          receptionistUnderstanding(input.turn, "unknown", input.input.text, this.now(), input.clinicProfile?.timezone)
         );
         return dataResult ?? { kind: "reply", text: buildReceptionistPolicyFallback(input.conversationState) };
       }
@@ -342,6 +351,36 @@ export class ConversationWorkflow {
     });
 
     return composedText ? { ...input.result, text: composedText } : input.result;
+  }
+
+  private async answerReceptionistBusinessQuestion(input: {
+    input: InboundMessage;
+    conversation: Conversation;
+    conversationState: ConversationState;
+    clinicProfile?: ClinicProfile;
+    turn: ReceptionistTurn;
+  }): Promise<WorkflowResult> {
+    const understanding = receptionistUnderstanding(
+      input.turn,
+      "question",
+      input.input.text,
+      this.now(),
+      input.clinicProfile?.timezone
+    );
+    const pendingFaqResult = await this.tryAnswerPendingBookingQuestion(input.input, input.conversation, understanding);
+    if (pendingFaqResult) {
+      return pendingFaqResult;
+    }
+
+    const faq = buildFaqResponse(input.clinicProfile, understanding);
+    if (faq) {
+      return { kind: "reply", text: faq };
+    }
+    if (hasRequestedFaqTopic(understanding) || input.turn.missingFacts.length > 0) {
+      return { kind: "reply", text: missingConfiguredFaqResponse };
+    }
+
+    return { kind: "reply", text: safeReceptionistReplyText(input.turn, input.conversationState) };
   }
 
   private async rememberExchange(input: InboundMessage, responseText: string) {
@@ -511,7 +550,7 @@ export class ConversationWorkflow {
       const faqPrefix = buildBookingFaqPrefix(profile, intent);
       return {
         kind: "reply",
-        text: `${faqPrefix}No encontre horarios disponibles para ${service.name} esta semana. Te aviso si se libera un turno o podes decirme otro dia.`
+        text: `${faqPrefix}No encontre horarios disponibles para ${service.name} con esa preferencia. Podes decirme otro dia u horario.`
       };
     }
 
@@ -880,8 +919,14 @@ function trimConversationText(text: string) {
 
 function receptionistUnderstanding(
   turn: ReceptionistTurn,
-  intent: ConversationUnderstanding["intent"]
+  intent: ConversationUnderstanding["intent"],
+  messageText: string,
+  now: Date,
+  timezone?: string
 ): ConversationUnderstanding {
+  const normalizedTimePreference =
+    detectNormalizedTimePreference(turn.timePreference ?? messageText, now, timezone) ?? turn.normalizedTimePreference;
+
   return {
     provider: "openai",
     intent,
@@ -889,6 +934,7 @@ function receptionistUnderstanding(
     serviceName: turn.serviceName ?? undefined,
     professionalPreference: turn.professionalPreference ?? undefined,
     timePreference: turn.timePreference ?? undefined,
+    normalizedTimePreference,
     requestedTopics: turn.requestedTopics,
     patientFullName: turn.patientFullName ?? undefined,
     requiresHuman: turn.needsHuman,
