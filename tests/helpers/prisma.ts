@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -28,11 +28,27 @@ export function createPrismaTestContext(prefix: string): PrismaTestContext {
 
 export function applySqliteMigrations(databasePath: string) {
   const migrationsPath = join(process.cwd(), "prisma", "migrations");
+  const migrationScriptPath = `${databasePath}.migrations.sql`;
   const migrationSql = readdirSync(migrationsPath)
     .filter((entry) => entry !== "migration_lock.toml")
     .sort()
     .map((entry) => readFileSync(join(migrationsPath, entry, "migration.sql"), "utf8"))
     .join("\n");
 
-  execFileSync("sqlite3", [databasePath], { input: migrationSql });
+  writeFileSync(migrationScriptPath, migrationSql);
+  try {
+    execFileSync(
+      process.execPath,
+      [prismaCliPath(), "db", "execute", "--url", `file:${databasePath}`, "--file", migrationScriptPath],
+      {
+        env: { ...process.env, PRISMA_HIDE_UPDATE_MESSAGE: "1" }
+      }
+    );
+  } finally {
+    rmSync(migrationScriptPath, { force: true });
+  }
+}
+
+function prismaCliPath() {
+  return join(process.cwd(), "node_modules", "prisma", "build", "index.js");
 }
