@@ -23,6 +23,7 @@ import {
 import { readWhatsAppConfig } from "../config/whatsapp.js";
 import { buildDefaultCalendar, type CalendarProvider } from "../dev/seed.js";
 import {
+  buildConversationReceptionistAgent,
   buildConversationResponseComposer,
   buildConversationInterpreter,
   buildGoogleCalendarRuntime,
@@ -73,6 +74,7 @@ export async function createProductionAppRuntime(
   });
   const aiConfig = readAIConfig(env);
   const conversationInterpreter = buildConversationInterpreter(aiConfig);
+  const conversationReceptionistAgent = buildConversationReceptionistAgent(aiConfig);
   const conversationResponseComposer = buildConversationResponseComposer(aiConfig);
   const onboardingRuntimeNeeded = needsOnboardingRuntime({
     adminEnabled: adminConfig.enabled,
@@ -120,6 +122,7 @@ export async function createProductionAppRuntime(
             audit: new PrismaAuditLog(requirePrisma(sharedPrisma)),
             calendar: googleRuntime?.calendar ?? buildDefaultCalendar(calendarProvider),
             interpreter: conversationInterpreter,
+            receptionistAgent: conversationReceptionistAgent,
             responseComposer: conversationResponseComposer
           })
         : undefined;
@@ -142,6 +145,7 @@ export async function createProductionAppRuntime(
             calendar: googleRuntime?.calendar,
             clinicId: readRuntimeClinicId(env),
             interpreter: conversationInterpreter,
+            receptionistAgent: conversationReceptionistAgent,
             responseComposer: conversationResponseComposer,
             clinicActivation
           })

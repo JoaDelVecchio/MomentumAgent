@@ -11,6 +11,7 @@ import type { OnboardingRepository } from "../../ports/onboarding.js";
 import type { OperationalRepository } from "../../ports/repositories.js";
 import { ConversationWorkflow, type WorkflowResult } from "../conversations/conversation-workflow.js";
 import type { ConversationInterpreter } from "../conversations/interpreter.js";
+import type { ReceptionistAgent } from "../conversations/receptionist-agent.js";
 import type { ConversationResponseComposer } from "../conversations/response-composer.js";
 import { RulesConversationInterpreter } from "../conversations/rules-interpreter.js";
 import { SchedulingService } from "../scheduling/scheduling-service.js";
@@ -22,6 +23,7 @@ export type OnboardingTestModeServiceOptions = {
   calendar: CalendarPort;
   now?: () => Date;
   interpreter?: ConversationInterpreter;
+  receptionistAgent?: ReceptionistAgent;
   responseComposer?: ConversationResponseComposer;
 };
 
@@ -66,7 +68,11 @@ export class OnboardingTestModeService {
       options.audit,
       this.now,
       options.interpreter ?? new RulesConversationInterpreter(),
-      { bookingMode: "simulate", responseComposer: options.responseComposer }
+      {
+        bookingMode: "simulate",
+        receptionistAgent: options.receptionistAgent,
+        responseComposer: options.responseComposer
+      }
     );
   }
 

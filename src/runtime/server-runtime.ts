@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import OpenAI from "openai";
 import { OpenAIConversationInterpreter } from "../adapters/openai/openai-conversation-interpreter.js";
 import { OpenAIConversationResponseComposer } from "../adapters/openai/openai-conversation-response-composer.js";
+import { OpenAIReceptionistAgent } from "../adapters/openai/openai-receptionist-agent.js";
 import { GoogleCalendarAdapter } from "../adapters/google/google-calendar-adapter.js";
 import { GoogleCalendarApiClient } from "../adapters/google/google-calendar-client.js";
 import { GoogleOAuthService, type GoogleOAuthClient } from "../adapters/google/google-oauth.js";
@@ -15,6 +16,7 @@ import { KapsoWhatsAppProvider } from "../adapters/whatsapp/kapso/kapso-whatsapp
 import { ConversationWorkflow } from "../application/conversations/conversation-workflow.js";
 import { FallbackConversationInterpreter } from "../application/conversations/fallback-interpreter.js";
 import type { ConversationInterpreter } from "../application/conversations/interpreter.js";
+import type { ReceptionistAgent } from "../application/conversations/receptionist-agent.js";
 import type { ConversationResponseComposer } from "../application/conversations/response-composer.js";
 import { RulesConversationInterpreter } from "../application/conversations/rules-interpreter.js";
 import { OutboundTemplateService } from "../application/messaging/outbound-template-service.js";
@@ -88,6 +90,7 @@ export async function buildWhatsAppRuntime(input: {
   clinicId?: string;
   aiConfig?: AIConfig;
   interpreter?: ConversationInterpreter;
+  receptionistAgent?: ReceptionistAgent;
   responseComposer?: ConversationResponseComposer;
   clinicActivation?: ClinicActivationGuard;
 }) {
@@ -120,8 +123,11 @@ export async function buildWhatsAppRuntime(input: {
   );
   const aiConfig = input.aiConfig ?? (input.interpreter ? undefined : readAIConfig());
   const interpreter = input.interpreter ?? buildConversationInterpreter(requireAIConfig(aiConfig));
+  const receptionistAgent =
+    input.receptionistAgent ?? (aiConfig ? buildConversationReceptionistAgent(aiConfig) : undefined);
   const responseComposer = input.responseComposer ?? (aiConfig ? buildConversationResponseComposer(aiConfig) : undefined);
   const workflow = new ConversationWorkflow(repos, scheduling, audit, () => new Date(), interpreter, {
+    receptionistAgent,
     responseComposer
   });
 
@@ -164,6 +170,19 @@ export function buildConversationResponseComposer(config: AIConfig): Conversatio
   }
 
   return new OpenAIConversationResponseComposer({
+    client: new OpenAI({ apiKey: config.apiKey }),
+    model: config.model,
+    timeoutMs: config.timeoutMs,
+    reasoningEffort: config.reasoningEffort
+  });
+}
+
+export function buildConversationReceptionistAgent(config: AIConfig): ReceptionistAgent | undefined {
+  if (config.provider !== "openai") {
+    return undefined;
+  }
+
+  return new OpenAIReceptionistAgent({
     client: new OpenAI({ apiKey: config.apiKey }),
     model: config.model,
     timeoutMs: config.timeoutMs,

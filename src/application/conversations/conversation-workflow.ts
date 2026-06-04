@@ -9,6 +9,8 @@ import { buildFaqResponse, hasRequestedFaqTopic, missingConfiguredFaqResponse } 
 import type { ConversationInterpreter, ConversationUnderstanding, RequestedTopic } from "./interpreter.js";
 import { normalizeText } from "./intent.js";
 import { extractLikelyPatientFullName, normalizeFullNameIfComplete } from "./patient-data.js";
+import { decideReceptionistAction, type ReceptionistActionDecision } from "./receptionist-action-policy.js";
+import type { ReceptionistAgent, ReceptionistTurn } from "./receptionist-agent.js";
 import type { ConversationResponseComposer } from "./response-composer.js";
 import { formatPatientDateTime } from "./response-formatting.js";
 import { RulesConversationInterpreter } from "./rules-interpreter.js";
@@ -32,6 +34,7 @@ export type WorkflowResult =
 
 export type ConversationWorkflowOptions = {
   bookingMode?: "execute" | "simulate";
+  receptionistAgent?: ReceptionistAgent;
   responseComposer?: ConversationResponseComposer;
 };
 
@@ -70,6 +73,19 @@ export class ConversationWorkflow {
       activeAppointments,
       messageText: input.text
     });
+
+    if (this.options.receptionistAgent) {
+      const result = await this.handleReceptionistAgentMessage({
+        input,
+        conversation,
+        conversationState,
+        clinicProfile,
+        activeAppointments
+      });
+      await this.rememberExchange(input, result.text);
+      return result;
+    }
+
     const intent = await this.interpreter.interpret({
       clinicId: input.clinicId,
       conversationId: input.conversationId,
@@ -132,6 +148,71 @@ export class ConversationWorkflow {
     return finalResult;
   }
 
+  private async handleReceptionistAgentMessage(input: {
+    input: InboundMessage;
+    conversation: Conversation;
+    conversationState: ConversationState;
+    clinicProfile?: ClinicProfile;
+    activeAppointments: Appointment[];
+  }): Promise<WorkflowResult> {
+    const turn = await this.options.receptionistAgent!.respond({
+      clinicId: input.input.clinicId,
+      conversationId: input.input.conversationId,
+      patientId: input.input.patientId,
+      messageText: input.input.text,
+      now: this.now(),
+      clinicProfile: input.clinicProfile,
+      pendingBooking: input.conversation.pendingBooking,
+      conversationState: input.conversationState,
+      activeAppointments: input.activeAppointments,
+      recentMessages: input.conversation.recentMessages ?? []
+    });
+
+    await this.audit.record({
+      clinicId: input.input.clinicId,
+      conversationId: input.input.conversationId,
+      type: "receptionist.turn",
+      message: `Proposed ${turn.proposedAction}`,
+      metadata: {
+        proposedAction: turn.proposedAction,
+        confidence: String(turn.confidence),
+        serviceName: turn.serviceName ?? "",
+        requestedTopics: turn.requestedTopics.join(","),
+        needsHuman: String(turn.needsHuman),
+        safetyReason: turn.safetyReason ?? "",
+        reason: turn.reason
+      }
+    });
+
+    const decision = decideReceptionistAction({
+      messageText: input.input.text,
+      state: input.conversationState,
+      turn
+    });
+
+    await this.audit.record({
+      clinicId: input.input.clinicId,
+      conversationId: input.input.conversationId,
+      type: "receptionist.decision",
+      message: `Allowed ${decision.action}`,
+      metadata: {
+        proposedAction: decision.proposedAction,
+        action: decision.action,
+        stage: decision.stage,
+        reason: decision.reason
+      }
+    });
+
+    return await this.executeReceptionistDecision({
+      input: input.input,
+      conversation: input.conversation,
+      conversationState: input.conversationState,
+      clinicProfile: input.clinicProfile,
+      turn,
+      decision
+    });
+  }
+
   private async executeDecision(
     input: InboundMessage,
     conversation: Conversation,
@@ -185,6 +266,55 @@ export class ConversationWorkflow {
       }
       case "reply_contextual_fallback":
         return { kind: "reply", text: buildContextualFallback(conversationState) };
+    }
+  }
+
+  private async executeReceptionistDecision(input: {
+    input: InboundMessage;
+    conversation: Conversation;
+    conversationState: ConversationState;
+    clinicProfile?: ClinicProfile;
+    turn: ReceptionistTurn;
+    decision: ReceptionistActionDecision;
+  }): Promise<WorkflowResult> {
+    switch (input.decision.action) {
+      case "handoff":
+        return await this.pauseForHandoff(input.input);
+      case "reply_only":
+        return {
+          kind: "reply",
+          text:
+            input.decision.proposedAction === "reply_only" || input.decision.proposedAction === "answer_business_question"
+              ? safeReceptionistReplyText(input.turn, input.conversationState)
+              : buildReceptionistPolicyFallback(input.conversationState)
+        };
+      case "answer_business_question":
+        return { kind: "reply", text: safeReceptionistReplyText(input.turn, input.conversationState) };
+      case "search_slots":
+        return await this.handleBookingIntent(input.input, receptionistUnderstanding(input.turn, "book"));
+      case "refine_pending_slot":
+        return await this.handlePendingSlotRefinement(
+          input.input,
+          input.conversation,
+          receptionistUnderstanding(input.turn, "slot_refinement"),
+          input.clinicProfile
+        );
+      case "confirm_pending_booking":
+        return await this.handleConfirmation(input.input, input.conversation);
+      case "collect_patient_data": {
+        const dataResult = await this.tryCompletePendingPatientData(
+          input.input,
+          input.conversation,
+          receptionistUnderstanding(input.turn, "unknown")
+        );
+        return dataResult ?? { kind: "reply", text: buildReceptionistPolicyFallback(input.conversationState) };
+      }
+      case "cancel_appointment":
+        await this.clearPendingBooking(input.input.clinicId, input.input.conversationId);
+        return await this.handleCancelIntent(input.input);
+      case "reschedule_appointment":
+        await this.clearPendingBooking(input.input.clinicId, input.input.conversationId);
+        return await this.handleRescheduleIntent(input.input);
     }
   }
 
@@ -746,6 +876,57 @@ function trimRecentMessages(messages: ConversationMessage[]) {
 
 function trimConversationText(text: string) {
   return text.replace(/\s+/g, " ").trim().slice(0, 2000);
+}
+
+function receptionistUnderstanding(
+  turn: ReceptionistTurn,
+  intent: ConversationUnderstanding["intent"]
+): ConversationUnderstanding {
+  return {
+    provider: "openai",
+    intent,
+    confidence: turn.confidence,
+    serviceName: turn.serviceName ?? undefined,
+    professionalPreference: turn.professionalPreference ?? undefined,
+    timePreference: turn.timePreference ?? undefined,
+    requestedTopics: turn.requestedTopics,
+    patientFullName: turn.patientFullName ?? undefined,
+    requiresHuman: turn.needsHuman,
+    safetyReason: turn.safetyReason ?? undefined,
+    reason: turn.reason
+  };
+}
+
+function buildReceptionistPolicyFallback(state: ConversationState) {
+  if (state.stage === "offering_slot") {
+    return "Te mantengo el horario ofrecido. Si queres, te lo confirmo o buscamos otro.";
+  }
+  if (state.stage === "rescheduling") {
+    return "Te mantengo el nuevo horario ofrecido. Si queres, te lo confirmo o buscamos otra opcion.";
+  }
+  if (state.stage === "booked") {
+    return "Te ayudo desde recepcion. Puedo ayudarte a cambiar o cancelar tu turno, o resolver dudas de la clinica.";
+  }
+  return "Te ayudo desde recepcion. Decime que necesitas de la clinica y lo vemos.";
+}
+
+function safeReceptionistReplyText(turn: ReceptionistTurn, state: ConversationState) {
+  if (hasCalendarMutationClaim(turn.replyDraft)) {
+    return buildReceptionistPolicyFallback(state);
+  }
+  return turn.replyDraft;
+}
+
+function hasCalendarMutationClaim(text: string) {
+  const normalized = normalizeText(text);
+  return (
+    normalized.includes("turno confirmado") ||
+    normalized.includes("turno cancelado") ||
+    normalized.includes("turno reprogramado") ||
+    normalized.includes("cita confirmada") ||
+    normalized.includes("cita cancelada") ||
+    normalized.includes("cita reprogramada")
+  );
 }
 
 function buildContextualFallback(state: ConversationState) {
