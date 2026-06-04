@@ -33,7 +33,9 @@ test("animated scene preserves the supplied booking and reminder interaction", (
   assert.match(scene, /Hola! Quería sacar un turno/);
   assert.match(scene, /Tengo libre a las 14:00 y 16:30/);
   assert.match(scene, /Listo, te agendé el martes 14:00/);
-  assert.match(scene, /Recordatorio automático/);
+  assert.match(scene, /Recordatorio listo/);
+  assert.match(scene, /remMention/);
+  assert.doesNotMatch(scene, /remBubble|remNote/);
   assert.match(scene, /Momentum responde por vos/);
   assert.match(scene, /ResizeObserver/);
   assert.match(scene, /prefers-reduced-motion: reduce/);

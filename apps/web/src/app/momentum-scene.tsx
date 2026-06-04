@@ -111,7 +111,8 @@ export default function MomentumScene() {
         </div>
 
         <div
-          className="card"
+          className="card reminder-card"
+          aria-label="Recordatorio automático"
           style={{
             ...sc.card,
             ...sc.rem,
@@ -119,27 +120,15 @@ export default function MomentumScene() {
             transform: reminder ? "translateY(0)" : "translateY(14px)"
           }}
         >
-          <div style={sc.remHead}>
-            <span style={sc.bell}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z"
-                  stroke="var(--accent-ink)"
-                  strokeWidth="1.8"
-                  strokeLinejoin="round"
-                />
-                <path d="M10 20a2 2 0 0 0 4 0" stroke="var(--accent-ink)" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
+          <div style={sc.remMention}>
+            <span style={sc.remAt}>@</span>
+            <div style={sc.remCopy}>
+              <span style={sc.remKicker}>Recordatorio listo</span>
+              <strong style={sc.remMain}>Lucía M. · mañana 14:00</strong>
+            </div>
+            <span style={sc.remDone}>
+              <Check s={13} />
             </span>
-            <span style={sc.remTitle}>Recordatorio automático</span>
-            <span style={sc.remTag}>1 día antes</span>
-          </div>
-          <div style={sc.remBubble}>
-            Hola Lucía, te recordamos tu turno mañana a las <b style={{ fontWeight: 700 }}>14:00</b>. ¡Te esperamos!
-          </div>
-          <div style={sc.remNote}>
-            <Check s={12} />
-            Enviado automáticamente · reduce ausencias
           </div>
         </div>
       </div>
@@ -532,56 +521,65 @@ const sc: Record<string, CSSProperties> = {
   slotEmpty: { flex: 1, height: 2, borderRadius: 2, background: "var(--line-soft)" },
   rem: {
     right: 0,
-    top: 284,
-    width: 248,
-    padding: 14,
-    display: "flex",
-    flexDirection: "column",
+    top: 302,
+    width: 232,
+    padding: 10,
+    display: "block",
+    overflow: "hidden",
     zIndex: 4,
     transition: "opacity .5s cubic-bezier(.2,.7,.2,1), transform .5s cubic-bezier(.2,.7,.2,1)"
   },
-  remHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 11 },
-  bell: {
+  remMention: {
+    display: "grid",
+    gridTemplateColumns: "28px minmax(0, 1fr) 18px",
+    alignItems: "center",
+    gap: 9,
+    minWidth: 0
+  },
+  remAt: {
     width: 28,
     height: 28,
-    borderRadius: 9,
+    borderRadius: 10,
     background: "var(--accent-soft)",
-    display: "grid",
-    placeItems: "center",
-    flexShrink: 0
-  },
-  remTitle: { fontWeight: 700, fontSize: 12.5, letterSpacing: "-.01em", flex: 1, whiteSpace: "nowrap" },
-  remTag: {
-    fontFamily: "var(--mono)",
-    fontSize: 9,
-    letterSpacing: ".06em",
-    textTransform: "uppercase",
     color: "var(--accent-ink)",
-    background: "var(--accent-soft)",
-    padding: "3px 7px",
-    borderRadius: 999,
-    flexShrink: 0
-  },
-  remBubble: {
-    fontSize: 12,
-    lineHeight: 1.42,
-    color: "var(--ink)",
-    background: "var(--accent-soft)",
-    border: "1px solid color-mix(in oklab, var(--accent) 16%, transparent)",
-    borderRadius: 13,
-    borderBottomRightRadius: 5,
-    padding: "9px 11px",
-    marginBottom: 11
-  },
-  remNote: {
-    marginTop: 11,
-    paddingTop: 10,
-    borderTop: "1px solid var(--line-soft)",
-    fontSize: 10.5,
-    lineHeight: 1.35,
-    color: "var(--ink-faint)",
     display: "flex",
     alignItems: "center",
-    gap: 7
+    justifyContent: "center",
+    fontFamily: "var(--mono)",
+    fontSize: 13,
+    fontWeight: 700,
+    flexShrink: 0
+  },
+  remCopy: {
+    display: "grid",
+    gap: 2,
+    minWidth: 0
+  },
+  remKicker: {
+    fontFamily: "var(--mono)",
+    fontSize: 9.5,
+    letterSpacing: ".08em",
+    textTransform: "uppercase",
+    color: "var(--ink-faint)",
+    lineHeight: 1.2,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis"
+  },
+  remMain: {
+    minWidth: 0,
+    color: "var(--ink)",
+    fontSize: 12.5,
+    fontWeight: 700,
+    letterSpacing: "-.01em",
+    lineHeight: 1.25,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis"
+  },
+  remDone: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center"
   }
 };
