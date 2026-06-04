@@ -3,38 +3,43 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 const landing = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
+const scene = readFileSync(new URL("../src/app/momentum-scene.tsx", import.meta.url), "utf8");
 const lead = readFileSync(new URL("../src/app/lead/page.tsx", import.meta.url), "utf8");
 const layout = readFileSync(new URL("../src/app/layout.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("../src/app/globals.css", import.meta.url), "utf8");
 
-test("public landing uses Cluely-inspired Spanish product positioning", () => {
-  assert.match(landing, /Agenda llena\. Inbox liviano\./);
-  assert.match(landing, /Activar piloto/);
-  assert.match(landing, /Ver el flujo/);
-  assert.match(landing, /No es otro chatbot\. Es una capa operativa para convertir demanda en turnos\./);
-  assert.match(landing, /product-theater/);
-  assert.match(landing, /whatsapp-stage/);
-  assert.match(landing, /whatsapp-web/);
-  assert.match(landing, /real-whatsapp-shot/);
-  assert.match(landing, /whatsapp-rail/);
-  assert.match(landing, /whatsapp-message/);
-  assert.match(landing, /whatsapp-composer/);
-  assert.match(landing, /whatsapp-browser-bar/);
-  assert.match(landing, /web\.whatsapp\.com/);
-  assert.match(landing, /WhatsApp conectado/);
-  assert.match(landing, /Momentum escucha/);
-  assert.match(landing, /Intención: reservar botox/);
-  assert.match(landing, /soy el asistente de Clínica Aura/);
-  assert.match(landing, /Turno creado · jue 17:30/);
-  assert.doesNotMatch(landing, /La recepción IA que convierte WhatsApp en turnos confirmados\./);
-  assert.doesNotMatch(landing, /momentum-os|os-grid|operator-panel|agenda-panel/);
-  assert.doesNotMatch(landing, /chat-phone|chat-sidecar|booking-receipt|insight-card|command-deck/);
-  assert.doesNotMatch(landing, /mock-phone/);
-  assert.doesNotMatch(landing, /Turn WhatsApp into your clinic&apos;s appointment engine/);
-  assert.doesNotMatch(landing, /AI receptionist for aesthetic clinics/);
+test("public landing follows the supplied Momentum ZIP design contract", () => {
+  assert.match(landing, /Recepcionista IA · WhatsApp/);
+  assert.match(landing, /No pierdas/);
+  assert.match(landing, /ni un <span className="em">cliente<\/span>\./);
+  assert.match(landing, /Momentum atiende a tus clientes, agenda, reprograma y recuerda cada turno por WhatsApp/);
+  assert.match(landing, /Agendar una llamada/);
+  assert.match(landing, /Ver una conversación real/);
+  assert.match(landing, /Se sincroniza con Google Calendar/);
+  assert.match(landing, /Atiende 24\/7/);
+  assert.match(landing, /Agenda sola/);
+  assert.match(landing, /Recordatorios/);
+  assert.match(landing, /Menos ausencias/);
+  assert.match(landing, /MomentumScene/);
+  assert.match(landing, /landing-shell/);
+  assert.match(landing, /landing-main/);
+  assert.match(landing, /landing-feats/);
+  assert.doesNotMatch(landing, /product-theater|whatsapp-stage|whatsapp-web|real-whatsapp-shot/);
+  assert.doesNotMatch(landing, /Agenda llena\. Inbox liviano\./);
 });
 
-test("lead application keeps behavior while presenting the redesigned pilot request", () => {
+test("animated scene preserves the supplied booking and reminder interaction", () => {
+  assert.match(scene, /"use client"/);
+  assert.match(scene, /Hola! Quería sacar un turno/);
+  assert.match(scene, /Tengo libre a las 14:00 y 16:30/);
+  assert.match(scene, /Listo, te agendé el martes 14:00/);
+  assert.match(scene, /Recordatorio automático/);
+  assert.match(scene, /Momentum responde por vos/);
+  assert.match(scene, /ResizeObserver/);
+  assert.match(scene, /prefers-reduced-motion: reduce/);
+});
+
+test("lead application keeps behavior while presenting the refreshed pilot request", () => {
   assert.match(lead, /Solicitud de piloto/);
   assert.match(lead, /Tu piloto empieza con contexto/);
   assert.match(lead, /Diagnóstico operativo/);
@@ -50,38 +55,31 @@ test("lead application keeps behavior while presenting the redesigned pilot requ
   assert.match(lead, /name="mainPain"/);
 });
 
-test("document metadata is localized for the public Spanish experience", () => {
+test("document metadata and fonts are localized for the public Spanish experience", () => {
   assert.match(layout, /Momentum \| Recepción IA para clínicas estéticas/);
   assert.match(layout, /Convertí WhatsApp en turnos confirmados con Momentum/);
+  assert.match(layout, /api\.fontshare\.com/);
+  assert.match(layout, /JetBrains\+Mono/);
   assert.doesNotMatch(layout, /AI receptionist for aesthetic clinics/);
   assert.doesNotMatch(layout, /Turn WhatsApp conversations into confirmed appointments/);
 });
 
-test("public CSS uses a clean Cluely-style glass palette without the old grid treatment", () => {
-  assert.match(css, /\.product-theater/);
-  assert.match(css, /\.whatsapp-stage/);
-  assert.match(css, /\.whatsapp-browser-bar/);
-  assert.match(css, /\.whatsapp-web/);
-  assert.match(css, /\.whatsapp-rail/);
-  assert.match(css, /\.whatsapp-message/);
-  assert.match(css, /\.whatsapp-agent-lens/);
-  assert.match(css, /\.whatsapp-agent-toast/);
-  assert.match(css, /\.whatsapp-composer/);
-  assert.match(css, /--page: #eef2f8;/);
-  assert.match(css, /--glass: rgba\(255, 255, 255, 0\.72\);/);
-  assert.match(css, /backdrop-filter: blur\(24px\)/);
-  assert.match(css, /\.lead-intro\s*\{[\s\S]*color: var\(--ink\);/);
-  assert.match(css, /@keyframes theaterReveal/);
-  assert.match(css, /@keyframes messageIn/);
-  assert.match(css, /@keyframes typingBlink/);
-  assert.match(css, /@keyframes lensFloat/);
+test("public CSS uses the supplied light Momentum tokens across all web paths", () => {
+  assert.match(css, /--bg: oklch\(0\.986 0\.004 95\);/);
+  assert.match(css, /--accent: oklch\(0\.64 0\.118 158\);/);
+  assert.match(css, /--sans: "Satoshi"/);
+  assert.match(css, /\.landing-shell/);
+  assert.match(css, /\.landing-main/);
+  assert.match(css, /\.landing-feats/);
+  assert.match(css, /\.stage-fit/);
+  assert.match(css, /\.lead-shell/);
+  assert.match(css, /\.internal-shell/);
+  assert.match(css, /\.test-chat-thread/);
+  assert.match(css, /@keyframes msgIn/);
+  assert.match(css, /@keyframes slotIn/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.doesNotMatch(css, /\.momentum-os|\.os-grid|\.operator-panel|\.agenda-panel/);
-  assert.doesNotMatch(css, /\.chat-phone|\.chat-sidecar|\.booking-receipt|\.insight-card|\.command-deck/);
-  assert.doesNotMatch(css, /\.mock-phone/);
-  assert.doesNotMatch(css, /#f4efe5|#fffaf0|#ff6f4d|#c7912c/);
-  assert.doesNotMatch(css, /background-size: 88px 88px|background-size: 74px 74px/);
-  assert.doesNotMatch(css, /linear-gradient\(rgba\(22, 18, 13, 0\.055\) 1px/);
-  assert.doesNotMatch(css, /linear-gradient\(rgba\(255, 250, 240, 0\.06\) 1px/);
-  assert.doesNotMatch(css, /var\(--night\) 0 370px|var\(--night\) 0 560px/);
+  assert.doesNotMatch(css, /--page: #eef2f8/);
+  assert.doesNotMatch(css, /--glass: rgba\(255, 255, 255, 0\.72\)/);
+  assert.doesNotMatch(css, /product-theater|whatsapp-stage|whatsapp-web/);
+  assert.doesNotMatch(css, /#08090d 0%|var\(--night\)/);
 });
